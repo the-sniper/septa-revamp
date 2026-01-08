@@ -88,9 +88,10 @@ function getStepColor(step: TransitStep): string {
   return colors.bg;
 }
 
-// Create SVG path for direction arrow (Google Maps style)
+// Create SVG path for direction arrow (Google Maps style - compact with rounded feel)
 function createArrowPath(): string {
-  return 'M 0,-15 L 8,10 L 0,5 L -8,10 Z';
+  // Compact, rounded arrow like Google Maps
+  return 'M 0,-6 L 5,5 Q 0,2 -5,5 Z';
 }
 
 export default function TripMap({ 
@@ -275,19 +276,18 @@ export default function TripMap({
       markersRef.current.push(originMarker);
     }
 
-    // Destination marker (red flag style)
+    // Destination marker (red dot)
     if (route.endLocation) {
       const destMarker = new google.maps.Marker({
         position: { lat: route.endLocation.lat, lng: route.endLocation.lng },
         map: googleMapRef.current,
         icon: {
-          path: 'M 0,0 L 0,-20 L 15,-15 L 0,-10 Z',
-          scale: 1.5,
+          path: google.maps.SymbolPath.CIRCLE,
+          scale: 10,
           fillColor: '#ef4444',
           fillOpacity: 1,
           strokeColor: '#ffffff',
-          strokeWeight: 2,
-          anchor: new google.maps.Point(0, 0),
+          strokeWeight: 3,
         },
         title: destinationName || 'Destination',
         zIndex: 100,
@@ -318,7 +318,23 @@ export default function TripMap({
           },
           title: step.departureStop || 'Board here',
           zIndex: isCurrentStep ? 50 : 10,
+          cursor: 'pointer',
         });
+        
+        // Click to center on this stop
+        const stopName = step.departureStop || 'Board here';
+        const lineName = step.lineName || 'Transit';
+        marker.addListener('click', () => {
+          if (googleMapRef.current && step.departureLocation) {
+            googleMapRef.current.panTo({ lat: step.departureLocation.lat, lng: step.departureLocation.lng });
+            // Show info window
+            const infoWindow = new google.maps.InfoWindow({
+              content: `<div style="color:#000;padding:4px;font-size:13px;"><strong>${stopName}</strong><br/><span style="color:#666;">Board ${lineName}</span></div>`,
+            });
+            infoWindow.open(googleMapRef.current, marker);
+          }
+        });
+        
         markersRef.current.push(marker);
       }
 
@@ -337,7 +353,23 @@ export default function TripMap({
           },
           title: step.arrivalStop || 'Exit here',
           zIndex: isCurrentStep ? 50 : 10,
+          cursor: 'pointer',
         });
+        
+        // Click to center on this stop
+        const stopName = step.arrivalStop || 'Exit here';
+        const lineName = step.lineName || 'Transit';
+        marker.addListener('click', () => {
+          if (googleMapRef.current && step.arrivalLocation) {
+            googleMapRef.current.panTo({ lat: step.arrivalLocation.lat, lng: step.arrivalLocation.lng });
+            // Show info window
+            const infoWindow = new google.maps.InfoWindow({
+              content: `<div style="color:#000;padding:4px;font-size:13px;"><strong>${stopName}</strong><br/><span style="color:#666;">Exit ${lineName}</span></div>`,
+            });
+            infoWindow.open(googleMapRef.current, marker);
+          }
+        });
+        
         markersRef.current.push(marker);
       }
     });
@@ -358,7 +390,7 @@ export default function TripMap({
         map: googleMapRef.current,
         icon: hasHeading ? {
           path: createArrowPath(),
-          scale: 1.5,
+          scale: 2,
           fillColor: '#4285F4', // Google blue
           fillOpacity: 1,
           strokeColor: '#ffffff',
@@ -371,13 +403,29 @@ export default function TripMap({
           fillColor: '#4285F4',
           fillOpacity: 1,
           strokeColor: '#ffffff',
-          strokeWeight: 4,
+          strokeWeight: 3,
         },
         title: 'You are here',
         zIndex: 1000,
+        cursor: 'pointer',
+        optimized: false, // Better click handling
       });
 
-      // Add pulsing accuracy circle
+      // Click on user marker to recenter and follow
+      userMarkerRef.current.addListener('click', () => {
+        if (googleMapRef.current && userMarkerRef.current) {
+          const pos = userMarkerRef.current.getPosition();
+          if (pos) {
+            mapMovedByUser.current = false;
+            setIsFollowing(true);
+            googleMapRef.current.panTo(pos);
+            googleMapRef.current.setZoom(17);
+            console.log('User marker clicked - recentering');
+          }
+        }
+      });
+
+      // Add pulsing accuracy circle (not clickable so marker receives clicks)
       userCircleRef.current = new google.maps.Circle({
         map: googleMapRef.current,
         center: { lat: userLocation.lat, lng: userLocation.lng },
@@ -388,6 +436,7 @@ export default function TripMap({
         strokeOpacity: 0.5,
         strokeWeight: 2,
         zIndex: 999,
+        clickable: false,
       });
     } else {
       // Update position
@@ -397,7 +446,7 @@ export default function TripMap({
       if (hasHeading && (lastHeading.current !== userHeading)) {
         userMarkerRef.current.setIcon({
           path: createArrowPath(),
-          scale: 1.5,
+          scale: 2,
           fillColor: '#4285F4',
           fillOpacity: 1,
           strokeColor: '#ffffff',

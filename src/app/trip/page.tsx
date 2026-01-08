@@ -198,6 +198,46 @@ function sendNotification(title: string, body: string) {
 const PROXIMITY_ARRIVED = 50; // Close enough to consider arrived at a stop
 const PROXIMITY_APPROACHING = 150; // Getting close, prepare for action
 
+// Separate component for walking step to ensure proper event handling
+function WalkingStepButton({ 
+  step, 
+  idx, 
+  isCurrent, 
+  onSelect 
+}: { 
+  step: TransitStep; 
+  idx: number; 
+  isCurrent: boolean; 
+  onSelect: () => void;
+}) {
+  const handleInteraction = (e: React.MouseEvent | React.TouchEvent) => {
+    e.preventDefault();
+    e.stopPropagation();
+    console.log('Walking step interaction:', idx);
+    onSelect();
+  };
+
+  return (
+    <div 
+      className={`w-full text-left flex items-center justify-between py-3 px-3 -mx-2 rounded-lg transition-all cursor-pointer select-none
+        ${isCurrent ? 'bg-septa-blue/10 border border-septa-blue/30' : 'hover:bg-bg-secondary active:bg-bg-tertiary'}`}
+      onClick={handleInteraction}
+      onTouchEnd={handleInteraction}
+      role="button"
+      tabIndex={0}
+      onKeyDown={(e) => e.key === 'Enter' && onSelect()}
+    >
+      <div className="flex items-center gap-2">
+        <Footprints className={`w-4 h-4 ${isCurrent ? 'text-septa-blue' : 'text-text-muted'}`} />
+        <span className={`text-sm ${isCurrent ? 'text-septa-blue font-medium' : 'text-text-primary'}`}>
+          Walk {step.duration} ({step.distance})
+        </span>
+      </div>
+      <ChevronRight className={`w-4 h-4 ${isCurrent ? 'text-septa-blue' : 'text-text-muted'}`} />
+    </div>
+  );
+}
+
 export default function TripPlannerPage() {
   const { location: userLocation, requestLocation } = useGeolocation();
   
@@ -749,6 +789,20 @@ export default function TripPlannerPage() {
                 )}
               </div>
             </div>
+            
+            {/* Status message */}
+            {statusMessage && (
+              <div className="bg-septa-blue/90 backdrop-blur-sm px-4 py-2.5 flex items-center gap-2 border-b border-septa-blue/50">
+                <Navigation2 className="w-4 h-4 text-white flex-shrink-0" />
+                <span className="text-sm text-white font-medium truncate">{statusMessage}</span>
+                <button 
+                  onClick={() => setStatusMessage(null)}
+                  className="ml-auto p-1 hover:bg-white/20 rounded"
+                >
+                  <X className="w-3 h-3 text-white/70" />
+                </button>
+              </div>
+            )}
           </div>
 
           {/* Dev Simulator - Floating panel */}
@@ -868,15 +922,30 @@ export default function TripPlannerPage() {
                     {/* Step content */}
                     <div className={`flex-1 pb-4 ${isCurrent ? '' : ''}`}>
                       {step.mode === 'walking' ? (
-                        <button className="w-full text-left flex items-center justify-between py-2 hover:bg-bg-secondary rounded-lg px-2 -mx-2">
-                          <div className="flex items-center gap-2">
-                            <Footprints className="w-4 h-4 text-text-muted" />
-                            <span className="text-sm text-text-primary">Walk {step.duration} ({step.distance})</span>
-                          </div>
-                          <ChevronRight className="w-4 h-4 text-text-muted" />
-                        </button>
+                        <WalkingStepButton
+                          step={step}
+                          idx={idx}
+                          isCurrent={isCurrent}
+                          onSelect={() => {
+                            setCurrentStepIndex(idx);
+                            setIsSheetExpanded(false);
+                            const message = step.instructions || `Walk ${step.duration} (${step.distance})`;
+                            setStatusMessage(message);
+                          }}
+                        />
                       ) : (
-                        <div className={`rounded-xl ${isCurrent ? 'bg-bg-secondary p-3' : ''}`}>
+                        <div 
+                          className={`rounded-xl cursor-pointer transition-colors ${isCurrent ? 'bg-bg-secondary p-3' : 'hover:bg-bg-secondary/50 active:bg-bg-tertiary p-1 -m-1'}`}
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            console.log('Transit step clicked:', idx);
+                            setCurrentStepIndex(idx);
+                            setIsSheetExpanded(false);
+                            setStatusMessage(`Board ${step.lineName} at ${step.departureStop}`);
+                          }}
+                          role="button"
+                          tabIndex={0}
+                        >
                           {/* Departure stop */}
                           <div className="mb-2">
                             <p className="font-semibold text-text-primary">{step.departureStop}</p>
