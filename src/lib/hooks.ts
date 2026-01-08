@@ -1,12 +1,13 @@
 'use client';
 
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect, useCallback, useRef } from 'react';
 import { useLocation } from './store';
 
 export function useGeolocation() {
   const { userLocation, setUserLocation, locationPermission, setLocationPermission } = useLocation();
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const hasAutoRequested = useRef(false);
 
   const requestLocation = useCallback(() => {
     if (!navigator.geolocation) {
@@ -28,7 +29,9 @@ export function useGeolocation() {
       },
       (err) => {
         setError(err.message);
-        setLocationPermission('denied');
+        if (err.code === err.PERMISSION_DENIED) {
+          setLocationPermission('denied');
+        }
         setIsLoading(false);
       },
       {
@@ -39,9 +42,19 @@ export function useGeolocation() {
     );
   }, [setUserLocation, setLocationPermission]);
 
-  // Watch position for updates
+  // Auto-request location on mount if permission was previously granted
   useEffect(() => {
-    if (locationPermission !== 'granted') return;
+    if (hasAutoRequested.current) return;
+    
+    if (locationPermission === 'granted' && !userLocation) {
+      hasAutoRequested.current = true;
+      requestLocation();
+    }
+  }, [locationPermission, userLocation, requestLocation]);
+
+  // Watch position for updates when permission is granted
+  useEffect(() => {
+    if (locationPermission !== 'granted' || !navigator.geolocation) return;
 
     const watchId = navigator.geolocation.watchPosition(
       (position) => {
@@ -118,12 +131,19 @@ export function useLocalStorage<T>(key: string, initialValue: T) {
 }
 
 export function useInterval(callback: () => void, delay: number | null) {
+  const savedCallback = useRef(callback);
+  
+  // Remember the latest callback
+  useEffect(() => {
+    savedCallback.current = callback;
+  }, [callback]);
+
   useEffect(() => {
     if (delay === null) return;
 
-    const id = setInterval(callback, delay);
+    const id = setInterval(() => savedCallback.current(), delay);
     return () => clearInterval(id);
-  }, [callback, delay]);
+  }, [delay]);
 }
 
 export function useCopyToClipboard() {
@@ -200,3 +220,84 @@ export function useMediaQuery(query: string) {
   return matches;
 }
 
+// High-accuracy continuous location tracking for navigation
+export function useLiveLocation(enabled: boolean = true) {
+  const [location, setLocation] = useState<{
+    lat: number;
+    lng: number;
+    accuracy: number;
+    heading: number | null;
+    speed: number | null;
+    timestamp: number;
+  } | null>(null);
+  const [error, setError] = useState<string | null>(null);
+  const watchIdRef = useRef<number | null>(null);
+
+  useEffect(() => {
+    if (!enabled || !navigator.geolocation) {
+      if (watchIdRef.current !== null) {
+        navigator.geolocation.clearWatch(watchIdRef.current);
+        watchIdRef.current = null;
+      }
+      return;
+    }
+
+    const handleSuccess = (position: GeolocationPosition) => {
+      setLocation({
+        lat: position.coords.latitude,
+        lng: position.coords.longitude,
+        accuracy: position.coords.accuracy,
+        heading: position.coords.heading,
+        speed: position.coords.speed,
+        timestamp: position.timestamp,
+      });
+      setError(null);
+    };
+
+    const handleError = (err: GeolocationPositionError) => {
+      setError(err.message);
+    };
+
+    // High accuracy settings for navigation
+    const options: PositionOptions = {
+      enableHighAccuracy: true,
+      timeout: 10000,
+      maximumAge: 0, // Always get fresh position
+    };
+
+    // Get initial position immediately
+    navigator.geolocation.getCurrentPosition(handleSuccess, handleError, options);
+
+    // Then watch for updates
+    watchIdRef.current = navigator.geolocation.watchPosition(
+      handleSuccess,
+      handleError,
+      options
+    );
+
+    return () => {
+      if (watchIdRef.current !== null) {
+        navigator.geolocation.clearWatch(watchIdRef.current);
+        watchIdRef.current = null;
+      }
+    };
+  }, [enabled]);
+
+  return { location, error };
+}
+
+// Calculate distance between two points in meters (Haversine formula)
+export function getDistanceMeters(
+  lat1: number, lng1: number,
+  lat2: number, lng2: number
+): number {
+  const R = 6371000; // Earth's radius in meters
+  const dLat = (lat2 - lat1) * Math.PI / 180;
+  const dLng = (lng2 - lng1) * Math.PI / 180;
+  const a = 
+    Math.sin(dLat / 2) * Math.sin(dLat / 2) +
+    Math.cos(lat1 * Math.PI / 180) * Math.cos(lat2 * Math.PI / 180) *
+    Math.sin(dLng / 2) * Math.sin(dLng / 2);
+  const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
+  return R * c;
+}

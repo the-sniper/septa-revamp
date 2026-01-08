@@ -1,62 +1,81 @@
 'use client';
 
 import { useState, useMemo } from 'react';
-import { Route, Train, Tram, Bus } from 'lucide-react';
+import Link from 'next/link';
+import { Search, X, Train, Bus, TramFront, ChevronRight } from 'lucide-react';
 import { Header } from '@/components/Navigation';
-import { RouteList } from '@/components/RouteCard';
-import { SearchInput } from '@/components/ui/Input';
-import { Card } from '@/components/ui/Card';
-import { useDebounce } from '@/lib/hooks';
-import { SEPTA_ROUTES, getRoutesByType } from '@/lib/septa-api';
-import type { TransitMode, Route as RouteType } from '@/lib/types';
+import { SEPTA_ROUTES } from '@/lib/septa-api';
+import type { TransitMode } from '@/lib/types';
 
-type FilterMode = 'all' | TransitMode;
-
-const modeFilters: { value: FilterMode; label: string; icon: React.ReactNode }[] = [
-  { value: 'all', label: 'All', icon: <Route className="w-4 h-4" /> },
-  { value: 'bus', label: 'Bus', icon: <Bus className="w-4 h-4" /> },
-  { value: 'trolley', label: 'Trolley', icon: <Tram className="w-4 h-4" /> },
-  { value: 'subway', label: 'Subway', icon: <Train className="w-4 h-4" /> },
-  { value: 'regional_rail', label: 'Rail', icon: <Train className="w-4 h-4" /> },
+const MODE_FILTERS: { id: TransitMode | 'all'; label: string; icon?: React.ComponentType<{ className?: string }> }[] = [
+  { id: 'all', label: 'All' },
+  { id: 'subway', label: 'Subway', icon: Train },
+  { id: 'bus', label: 'Bus', icon: Bus },
+  { id: 'trolley', label: 'Trolley', icon: TramFront },
+  { id: 'regional_rail', label: 'Rail', icon: Train },
 ];
 
 export default function RoutesPage() {
   const [searchQuery, setSearchQuery] = useState('');
-  const [selectedMode, setSelectedMode] = useState<FilterMode>('all');
-  const debouncedQuery = useDebounce(searchQuery, 200);
+  const [activeMode, setActiveMode] = useState<TransitMode | 'all'>('all');
 
   const filteredRoutes = useMemo(() => {
-    let routes: RouteType[] = selectedMode === 'all' 
-      ? SEPTA_ROUTES 
-      : getRoutesByType(selectedMode);
+    let routes = [...SEPTA_ROUTES];
 
-    if (debouncedQuery) {
-      const query = debouncedQuery.toLowerCase();
-      routes = routes.filter(
-        (route) =>
-          route.routeId.toLowerCase().includes(query) ||
-          route.routeShortName.toLowerCase().includes(query) ||
-          route.routeLongName.toLowerCase().includes(query)
+    // Filter by mode
+    if (activeMode !== 'all') {
+      routes = routes.filter(r => r.routeType === activeMode);
+    }
+
+    // Filter by search
+    if (searchQuery.trim()) {
+      const query = searchQuery.toLowerCase();
+      routes = routes.filter(r =>
+        r.routeId.toLowerCase().includes(query) ||
+        r.routeShortName.toLowerCase().includes(query) ||
+        r.routeLongName.toLowerCase().includes(query)
       );
     }
 
     return routes;
-  }, [selectedMode, debouncedQuery]);
+  }, [activeMode, searchQuery]);
 
-  // Group routes by type for "All" view
+  // Group routes by type
   const groupedRoutes = useMemo(() => {
-    if (selectedMode !== 'all' || debouncedQuery) {
-      return null;
+    if (activeMode !== 'all' || searchQuery) {
+      return { filtered: filteredRoutes };
     }
 
     return {
-      subway: getRoutesByType('subway'),
-      regional_rail: getRoutesByType('regional_rail'),
-      trolley: getRoutesByType('trolley'),
-      bus: getRoutesByType('bus').slice(0, 10), // Show first 10 bus routes
-      nhsl: getRoutesByType('nhsl'),
+      subway: filteredRoutes.filter(r => r.routeType === 'subway'),
+      regional_rail: filteredRoutes.filter(r => r.routeType === 'regional_rail'),
+      trolley: filteredRoutes.filter(r => r.routeType === 'trolley'),
+      bus: filteredRoutes.filter(r => r.routeType === 'bus'),
+      nhsl: filteredRoutes.filter(r => r.routeType === 'nhsl'),
     };
-  }, [selectedMode, debouncedQuery]);
+  }, [filteredRoutes, activeMode, searchQuery]);
+
+  const getRouteColor = (type: TransitMode, routeId?: string) => {
+    switch (type) {
+      case 'bus': return 'bg-mode-bus';
+      case 'trolley': return 'bg-mode-trolley';
+      case 'subway': return routeId === 'BSL' ? 'bg-mode-subway-bsl' : 'bg-mode-subway-mfl';
+      case 'regional_rail': return 'bg-mode-rail';
+      case 'nhsl': return 'bg-mode-nhsl';
+      default: return 'bg-mode-bus';
+    }
+  };
+
+  const getModeLabel = (type: TransitMode) => {
+    switch (type) {
+      case 'subway': return 'Subway Lines';
+      case 'regional_rail': return 'Regional Rail';
+      case 'trolley': return 'Trolley Lines';
+      case 'bus': return 'Bus Routes';
+      case 'nhsl': return 'High Speed Line';
+      default: return type;
+    }
+  };
 
   return (
     <>
@@ -64,120 +83,108 @@ export default function RoutesPage() {
 
       <div className="max-w-lg mx-auto px-4 py-6 space-y-6">
         {/* Search */}
-        <SearchInput
-          value={searchQuery}
-          onChange={(e) => setSearchQuery(e.target.value)}
-          onClear={() => setSearchQuery('')}
-          placeholder="Search routes..."
-        />
+        <div className="relative">
+          <input
+            type="text"
+            value={searchQuery}
+            onChange={(e) => setSearchQuery(e.target.value)}
+            placeholder="Search routes..."
+            className="input w-full pl-12"
+          />
+          <Search className="absolute left-4 top-1/2 -translate-y-1/2 w-5 h-5 text-text-muted" />
+          {searchQuery && (
+            <button
+              onClick={() => setSearchQuery('')}
+              className="absolute right-4 top-1/2 -translate-y-1/2 p-1 hover:bg-bg-highlight rounded"
+            >
+              <X className="w-4 h-4 text-text-muted" />
+            </button>
+          )}
+        </div>
 
         {/* Mode Filter */}
-        <div className="flex gap-2 overflow-x-auto pb-2 -mx-4 px-4 scrollbar-hide">
-          {modeFilters.map((filter) => (
+        <div className="flex gap-2 overflow-x-auto scrollbar-hide pb-1">
+          {MODE_FILTERS.map((mode) => (
             <button
-              key={filter.value}
-              onClick={() => setSelectedMode(filter.value)}
+              key={mode.id}
+              onClick={() => setActiveMode(mode.id)}
               className={`
-                flex items-center gap-2 px-4 py-2 rounded-full whitespace-nowrap
-                text-sm font-medium transition-colors flex-shrink-0
-                ${selectedMode === filter.value
+                flex items-center gap-2 px-4 py-2 rounded-xl whitespace-nowrap
+                font-medium text-sm transition-all
+                ${activeMode === mode.id
                   ? 'bg-septa-blue text-white'
-                  : 'bg-background-elevated text-foreground-muted hover:bg-background-subtle'
+                  : 'bg-bg-secondary text-text-secondary hover:bg-bg-tertiary'
                 }
               `}
             >
-              {filter.icon}
-              {filter.label}
+              {mode.icon && <mode.icon className="w-4 h-4" />}
+              {mode.label}
             </button>
           ))}
         </div>
 
-        {/* Results */}
-        {groupedRoutes && !debouncedQuery ? (
-          // Grouped view
-          <div className="space-y-8">
-            {/* Subway */}
-            {groupedRoutes.subway.length > 0 && (
-              <section>
-                <h2 className="text-lg font-semibold text-foreground mb-3 flex items-center gap-2">
-                  <Train className="w-5 h-5 text-[#0066CC]" />
-                  Subway
-                </h2>
-                <RouteList routes={groupedRoutes.subway} showDirections />
-              </section>
-            )}
-
-            {/* Regional Rail */}
-            {groupedRoutes.regional_rail.length > 0 && (
-              <section>
-                <h2 className="text-lg font-semibold text-foreground mb-3 flex items-center gap-2">
-                  <Train className="w-5 h-5 text-[#91456C]" />
-                  Regional Rail
-                </h2>
-                <RouteList routes={groupedRoutes.regional_rail} compact />
-              </section>
-            )}
-
-            {/* NHSL */}
-            {groupedRoutes.nhsl.length > 0 && (
-              <section>
-                <h2 className="text-lg font-semibold text-foreground mb-3 flex items-center gap-2">
-                  <Train className="w-5 h-5 text-[#9B2D9B]" />
-                  Norristown High Speed Line
-                </h2>
-                <RouteList routes={groupedRoutes.nhsl} showDirections />
-              </section>
-            )}
-
-            {/* Trolley */}
-            {groupedRoutes.trolley.length > 0 && (
-              <section>
-                <h2 className="text-lg font-semibold text-foreground mb-3 flex items-center gap-2">
-                  <Tram className="w-5 h-5 text-[#00A550]" />
-                  Trolley
-                </h2>
-                <RouteList routes={groupedRoutes.trolley} compact />
-              </section>
-            )}
-
-            {/* Bus */}
-            {groupedRoutes.bus.length > 0 && (
-              <section>
-                <h2 className="text-lg font-semibold text-foreground mb-3 flex items-center gap-2">
-                  <Bus className="w-5 h-5 text-[#004F9F]" />
-                  Bus Routes
-                </h2>
-                <RouteList routes={groupedRoutes.bus} compact />
-                <button
-                  onClick={() => setSelectedMode('bus')}
-                  className="w-full mt-3 py-2 text-sm text-septa-blue hover:underline"
-                >
-                  View all {getRoutesByType('bus').length} bus routes →
-                </button>
-              </section>
+        {/* Routes */}
+        {searchQuery || activeMode !== 'all' ? (
+          // Flat list when searching or filtering
+          <div className="space-y-2">
+            {filteredRoutes.length === 0 ? (
+              <div className="card p-8 text-center">
+                <Search className="w-10 h-10 text-text-muted mx-auto mb-3" />
+                <p className="font-medium text-text-primary">No routes found</p>
+                <p className="text-sm text-text-secondary mt-1">
+                  Try a different search term
+                </p>
+              </div>
+            ) : (
+              filteredRoutes.map((route) => (
+                <Link key={route.routeId} href={`/route/${route.routeId}`}>
+                  <div className="card p-4 flex items-center gap-4 hover:bg-bg-highlight transition-colors">
+                    <span className={`${getRouteColor(route.routeType, route.routeId)} route-badge text-white min-w-[52px] text-center`}>
+                      {route.routeShortName}
+                    </span>
+                    <div className="flex-1 min-w-0">
+                      <p className="font-medium text-text-primary">{route.routeLongName}</p>
+                      <p className="text-sm text-text-muted truncate">
+                        {route.directions.map((d) => d.destinationName).join(' ↔ ')}
+                      </p>
+                    </div>
+                    <ChevronRight className="w-5 h-5 text-text-muted flex-shrink-0" />
+                  </div>
+                </Link>
+              ))
             )}
           </div>
         ) : (
-          // Filtered/Search view
-          <div>
-            <p className="text-sm text-foreground-muted mb-4">
-              {filteredRoutes.length} route{filteredRoutes.length !== 1 ? 's' : ''} found
-            </p>
-            {filteredRoutes.length > 0 ? (
-              <RouteList routes={filteredRoutes} compact />
-            ) : (
-              <Card variant="outlined" className="text-center py-8">
-                <Route className="w-8 h-8 text-foreground-subtle mx-auto mb-2" />
-                <p className="text-foreground-muted">No routes found</p>
-                <p className="text-sm text-foreground-subtle mt-1">
-                  Try a different search term
-                </p>
-              </Card>
-            )}
+          // Grouped list
+          <div className="space-y-8">
+            {Object.entries(groupedRoutes).map(([type, routes]) => {
+              if (!routes || routes.length === 0) return null;
+              return (
+                <section key={type}>
+                  <h2 className="text-sm font-semibold text-text-muted uppercase tracking-wider mb-3">
+                    {getModeLabel(type as TransitMode)}
+                  </h2>
+                  <div className="space-y-2">
+                    {routes.map((route: typeof SEPTA_ROUTES[number]) => (
+                      <Link key={route.routeId} href={`/route/${route.routeId}`}>
+                        <div className="card p-4 flex items-center gap-4 hover:bg-bg-highlight transition-colors">
+                          <span className={`${getRouteColor(route.routeType, route.routeId)} route-badge text-white min-w-[52px] text-center`}>
+                            {route.routeShortName}
+                          </span>
+                          <div className="flex-1 min-w-0">
+                            <p className="font-medium text-text-primary">{route.routeLongName}</p>
+                          </div>
+                          <ChevronRight className="w-5 h-5 text-text-muted flex-shrink-0" />
+                        </div>
+                      </Link>
+                    ))}
+                  </div>
+                </section>
+              );
+            })}
           </div>
         )}
       </div>
     </>
   );
 }
-

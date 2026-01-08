@@ -22,11 +22,16 @@ interface AppState {
   preferredModes: TransitMode[];
   setPreferredModes: (modes: TransitMode[]) => void;
 
-  // Location
+  // Location - now persisted!
   userLocation: { lat: number; lng: number } | null;
   setUserLocation: (location: { lat: number; lng: number } | null) => void;
   locationPermission: 'granted' | 'denied' | 'prompt';
   setLocationPermission: (permission: 'granted' | 'denied' | 'prompt') => void;
+  
+  // Saved places
+  savedPlaces: { name: string; address: string; lat: number; lng: number; type: 'home' | 'work' | 'other' }[];
+  addSavedPlace: (place: { name: string; address: string; lat: number; lng: number; type: 'home' | 'work' | 'other' }) => void;
+  removeSavedPlace: (name: string) => void;
 }
 
 export const useAppStore = create<AppState>()(
@@ -87,12 +92,23 @@ export const useAppStore = create<AppState>()(
 
       setPreferredModes: (modes) => set({ preferredModes: modes }),
 
-      // Location
+      // Location - persisted now
       userLocation: null,
       setUserLocation: (location) => set({ userLocation: location }),
 
       locationPermission: 'prompt',
       setLocationPermission: (permission) => set({ locationPermission: permission }),
+      
+      // Saved places
+      savedPlaces: [],
+      addSavedPlace: (place) =>
+        set((state) => ({
+          savedPlaces: [...state.savedPlaces.filter(p => p.type !== place.type || place.type === 'other'), place],
+        })),
+      removeSavedPlace: (name) =>
+        set((state) => ({
+          savedPlaces: state.savedPlaces.filter(p => p.name !== name),
+        })),
     }),
     {
       name: 'septa-app-storage',
@@ -101,6 +117,8 @@ export const useAppStore = create<AppState>()(
         favoriteRoutes: state.favoriteRoutes,
         recentItems: state.recentItems,
         preferredModes: state.preferredModes,
+        locationPermission: state.locationPermission, // Now persisted!
+        savedPlaces: state.savedPlaces,
       }),
     }
   )
@@ -146,3 +164,10 @@ export function useLocation() {
   return { userLocation, setUserLocation, locationPermission, setLocationPermission };
 }
 
+export function useSavedPlaces() {
+  const savedPlaces = useAppStore((state) => state.savedPlaces);
+  const addSavedPlace = useAppStore((state) => state.addSavedPlace);
+  const removeSavedPlace = useAppStore((state) => state.removeSavedPlace);
+
+  return { savedPlaces, addSavedPlace, removeSavedPlace };
+}

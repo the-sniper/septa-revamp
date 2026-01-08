@@ -10,8 +10,8 @@ import type {
   CacheEntry,
 } from './types';
 
-// SEPTA API Base URLs
-const SEPTA_API_BASE = 'https://www3.septa.org/api';
+// API Base URL - use local proxy routes to avoid CORS issues
+const API_BASE = '/api';
 
 // Cache configuration
 const CACHE_DURATION = {
@@ -80,9 +80,9 @@ export async function getBusArrivals(stopId: string): Promise<ApiResponse<Arriva
   }
 
   try {
-    // SEPTA Bus/Trolley Arrivals API
+    // Use local proxy API route
     const response = await fetchWithTimeout(
-      `${SEPTA_API_BASE}/BusSchedules/index.php?stop_id=${stopId}`
+      `${API_BASE}/arrivals?stop_id=${stopId}`
     );
 
     if (!response.ok) {
@@ -135,9 +135,9 @@ export async function getRealTimeArrivals(stopId: string): Promise<ApiResponse<A
   }
 
   try {
-    // SEPTA Real-Time Bus/Trolley API
+    // Use local proxy API route
     const response = await fetchWithTimeout(
-      `${SEPTA_API_BASE}/bustracker/index.php?stopid=${stopId}`
+      `${API_BASE}/realtime?stop_id=${stopId}`
     );
 
     if (!response.ok) {
@@ -177,8 +177,9 @@ export async function getRealTimeArrivals(stopId: string): Promise<ApiResponse<A
 
 export async function getTransitView(routeId: string): Promise<ApiResponse<unknown>> {
   try {
+    // Use local proxy API route
     const response = await fetchWithTimeout(
-      `${SEPTA_API_BASE}/TransitView/index.php?route=${routeId}`
+      `${API_BASE}/transitview?route=${routeId}`
     );
 
     if (!response.ok) {
@@ -216,7 +217,8 @@ export async function getAlerts(): Promise<ApiResponse<Alert[]>> {
   }
 
   try {
-    const response = await fetchWithTimeout(`${SEPTA_API_BASE}/Alerts/index.php`);
+    // Use local proxy API route
+    const response = await fetchWithTimeout(`${API_BASE}/alerts`);
 
     if (!response.ok) {
       throw new Error(`API returned ${response.status}`);
@@ -255,8 +257,9 @@ export async function getAlerts(): Promise<ApiResponse<Alert[]>> {
 
 export async function getRouteAlerts(routeId: string): Promise<ApiResponse<Alert[]>> {
   try {
+    // Use local proxy API route
     const response = await fetchWithTimeout(
-      `${SEPTA_API_BASE}/Alerts/index.php?route=${routeId}`
+      `${API_BASE}/alerts?route=${routeId}`
     );
 
     if (!response.ok) {
@@ -310,27 +313,22 @@ function transformRealTimeArrivals(rawData: unknown): Arrival[] {
   const arrivals: Arrival[] = [];
   const data = rawData as Record<string, unknown>;
 
-  // Handle different SEPTA response formats
-  const busList = data.bus || data.routes || [];
-  if (!Array.isArray(busList)) return [];
+  // Check if it's an error response
+  if (data.error) {
+    console.error('SEPTA API error:', data.error);
+    return [];
+  }
 
-  for (const bus of busList) {
-    const busData = bus as Record<string, unknown>;
-    const arrival: Arrival = {
-      tripId: String(busData.trip || busData.TripID || Math.random()),
-      routeId: String(busData.route || busData.Route || ''),
-      routeShortName: String(busData.route || busData.Route || ''),
-      direction: String(busData.Direction || busData.direction || ''),
-      destinationName: String(busData.destination || busData.Destination || 'Unknown'),
-      arrivalTime: new Date(Date.now() + Number(busData.late || 0) * 60000).toISOString(),
-      minutesUntilArrival: Number(busData.late || busData.minutes || 0),
-      trackingStatus: determineTrackingStatus(busData),
-      vehicleId: String(busData.VehicleID || busData.vehicle_id || ''),
-      lastUpdated: busData.Offset ? new Date().toISOString() : undefined,
-      isDelayed: Number(busData.late || 0) > 5,
-      delayMinutes: Number(busData.late || 0),
-    };
-    arrivals.push(arrival);
+  // BusSchedules API returns data keyed by route number
+  // Format: { "17": [...arrivals], "33": [...arrivals], etc }
+  for (const [routeId, trips] of Object.entries(data)) {
+    if (!Array.isArray(trips)) continue;
+
+    for (const trip of trips) {
+      const tripData = trip as Record<string, unknown>;
+      const arrival = parseArrival(tripData, routeId);
+      if (arrival) arrivals.push(arrival);
+    }
   }
 
   return arrivals.sort((a, b) => a.minutesUntilArrival - b.minutesUntilArrival);
@@ -456,18 +454,18 @@ export const SEPTA_ROUTES: Route[] = [
   { routeId: 'NHSL', routeShortName: 'NHSL', routeLongName: 'Norristown High Speed Line', routeType: 'nhsl', routeColor: '9B2D9B', directions: [{ directionId: 0, directionName: 'Outbound', destinationName: 'Norristown' }, { directionId: 1, directionName: 'Inbound', destinationName: '69th Street' }] },
 ];
 
-// Sample stops for demo
+// Sample stops with REAL SEPTA stop IDs
 export const SAMPLE_STOPS: Stop[] = [
-  { stopId: '1234', stopName: '15th & Market', lat: 39.9526, lng: -75.1652, routes: ['MFL', '17', '42', '47'], wheelchairAccessible: true },
-  { stopId: '2345', stopName: '30th Street Station', lat: 39.9557, lng: -75.1822, routes: ['MFL', 'AIR', 'PAO', 'TRE', 'WIL', '30', '42', 'LUCY'], wheelchairAccessible: true },
-  { stopId: '3456', stopName: 'City Hall', lat: 39.9526, lng: -75.1635, routes: ['BSL', 'MFL', '17', '23', '47'], wheelchairAccessible: true },
-  { stopId: '4567', stopName: '69th Street Transportation Center', lat: 39.9694, lng: -75.2593, routes: ['MFL', 'NHSL', '10', '11', '13', '34', '36', '104', '109'], wheelchairAccessible: true },
-  { stopId: '5678', stopName: 'Suburban Station', lat: 39.9539, lng: -75.1680, routes: ['AIR', 'CHE', 'CHW', 'LAN', 'MED', 'PAO', 'TRE', 'WAR', 'WIL'], wheelchairAccessible: true },
-  { stopId: '6789', stopName: 'Temple University', lat: 39.9812, lng: -75.1495, routes: ['BSL', 'AIR', 'CHE', 'CHW', 'LAN', 'MED', 'PAO', 'TRE', 'WAR', 'WIL'], wheelchairAccessible: true },
-  { stopId: '7890', stopName: 'Frankford Transportation Center', lat: 40.0236, lng: -75.0816, routes: ['MFL', '3', '5', '14', '20', '25', '66', '67', '88'], wheelchairAccessible: true },
-  { stopId: '8901', stopName: '40th & Market', lat: 39.9611, lng: -75.2005, routes: ['MFL', '10', '11', '13', '34', '36', '42', 'LUCY'], wheelchairAccessible: true },
-  { stopId: '9012', stopName: 'Fern Rock Transportation Center', lat: 40.0460, lng: -75.1139, routes: ['BSL', 'CHE', 'CHW', 'LAN', 'WAR', '16', 'C', 'R'], wheelchairAccessible: true },
-  { stopId: '0123', stopName: 'Olney Transportation Center', lat: 40.0339, lng: -75.1206, routes: ['BSL', '6', '16', '18', '22', '26', '55', 'C', 'R'], wheelchairAccessible: true },
+  { stopId: '10263', stopName: 'Market St & 13th St', lat: 39.9517, lng: -75.1608, routes: ['17', '33', '48'], wheelchairAccessible: true },
+  { stopId: '20724', stopName: '30th St Station', lat: 39.9557, lng: -75.1822, routes: ['30', '31', '42', '44', 'LUCY'], wheelchairAccessible: true },
+  { stopId: '615', stopName: 'Broad St & Market St', lat: 39.9526, lng: -75.1635, routes: ['4', '16', '17', '23', '27', '32', '47'], wheelchairAccessible: true },
+  { stopId: '11388', stopName: '69th St Transportation Center', lat: 39.9694, lng: -75.2593, routes: ['101', '102', '104', '109', '110', '111', '112', '113'], wheelchairAccessible: true },
+  { stopId: '10262', stopName: 'Market St & 15th St', lat: 39.9522, lng: -75.1652, routes: ['17', '33', '44'], wheelchairAccessible: true },
+  { stopId: '552', stopName: 'Broad St & Cecil B Moore Ave', lat: 39.9812, lng: -75.1528, routes: ['4', 'C'], wheelchairAccessible: true },
+  { stopId: '17842', stopName: 'Frankford Transportation Center', lat: 40.0236, lng: -75.0816, routes: ['3', '5', '14', '20', '25', '66', '67'], wheelchairAccessible: true },
+  { stopId: '31119', stopName: '40th St & Market St', lat: 39.9611, lng: -75.2005, routes: ['21', '30', '31', '42', 'LUCY'], wheelchairAccessible: true },
+  { stopId: '22180', stopName: 'Fern Rock Transportation Center', lat: 40.0460, lng: -75.1139, routes: ['16', 'C', 'R'], wheelchairAccessible: true },
+  { stopId: '2870', stopName: 'Olney Transportation Center', lat: 40.0339, lng: -75.1206, routes: ['6', '16', '18', '22', '26', '55', 'C', 'R'], wheelchairAccessible: true },
 ];
 
 export function searchStopsAndRoutes(query: string): (Stop | Route)[] {

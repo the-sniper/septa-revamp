@@ -11,22 +11,14 @@ import {
   RefreshCw,
   ExternalLink,
   AlertTriangle,
-  Clock,
-  Accessibility,
+  Share2,
 } from 'lucide-react';
 import { Header } from '@/components/Navigation';
-import { ArrivalList } from '@/components/ArrivalTime';
-import { RouteChip } from '@/components/RouteCard';
-import { AlertBanner } from '@/components/AlertCard';
-import { Card, CardHeader, CardTitle } from '@/components/ui/Card';
-import { Button, IconButton } from '@/components/ui/Button';
-import { Badge, TrackingBadge } from '@/components/ui/Badge';
-import { ArrivalSkeleton } from '@/components/ui/Skeleton';
-import { NoArrivalsState, ErrorState } from '@/components/ui/EmptyState';
+import { DepartureRowCompact, DepartureRowSkeleton } from '@/components/DepartureRow';
 import { useFavorites, useRecents } from '@/lib/store';
 import { useCopyToClipboard, useInterval, useOnlineStatus } from '@/lib/hooks';
 import { getStopById, getRealTimeArrivals, getRouteAlerts, SEPTA_ROUTES } from '@/lib/septa-api';
-import type { Stop, Arrival, Alert } from '@/lib/types';
+import type { Stop, Arrival, Alert, TransitMode } from '@/lib/types';
 
 export default function StopPage() {
   const params = useParams();
@@ -39,7 +31,6 @@ export default function StopPage() {
   const [isRefreshing, setIsRefreshing] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [lastUpdated, setLastUpdated] = useState<Date | null>(null);
-  const [isStale, setIsStale] = useState(false);
 
   const { isFavoriteStop, addFavoriteStop, removeFavoriteStop } = useFavorites();
   const { addRecentItem } = useRecents();
@@ -63,9 +54,9 @@ export default function StopPage() {
   }, [stopId, addRecentItem]);
 
   // Fetch arrivals
-  const fetchArrivals = useCallback(async (showRefreshing = false) => {
-    if (showRefreshing) setIsRefreshing(true);
-    else setIsLoading(true);
+  const fetchArrivals = useCallback(async (showLoading = true) => {
+    if (showLoading) setIsLoading(true);
+    else setIsRefreshing(true);
 
     try {
       const response = await getRealTimeArrivals(stopId);
@@ -75,10 +66,9 @@ export default function StopPage() {
       } else {
         setArrivals(response.data || []);
         setError(null);
-        setIsStale(response.isStale);
-        setLastUpdated(response.lastUpdated ? new Date(response.lastUpdated) : new Date());
+        setLastUpdated(new Date());
       }
-    } catch (err) {
+    } catch {
       setError('Failed to fetch arrivals');
     } finally {
       setIsLoading(false);
@@ -86,19 +76,17 @@ export default function StopPage() {
     }
   }, [stopId]);
 
-  // Initial fetch
   useEffect(() => {
     fetchArrivals();
   }, [fetchArrivals]);
 
-  // Auto-refresh every 30 seconds
   useInterval(() => {
     if (isOnline) {
-      fetchArrivals(true);
+      fetchArrivals(false);
     }
   }, 30000);
 
-  // Fetch alerts for routes at this stop
+  // Fetch alerts
   useEffect(() => {
     async function fetchAlerts() {
       if (!stop) return;
@@ -109,11 +97,10 @@ export default function StopPage() {
           allAlerts.push(...response.data);
         }
       }
-      // Deduplicate
       const uniqueAlerts = allAlerts.filter(
         (alert, index, self) => self.findIndex((a) => a.alertId === alert.alertId) === index
       );
-      setAlerts(uniqueAlerts);
+      setAlerts(uniqueAlerts.filter(a => a.severity === 'severe' || a.severity === 'warning'));
     }
     fetchAlerts();
   }, [stop]);
@@ -131,8 +118,16 @@ export default function StopPage() {
     }
   };
 
-  const handleCopy = () => {
-    copy(stopId);
+  const handleShare = async () => {
+    if (navigator.share && stop) {
+      await navigator.share({
+        title: stop.stopName,
+        text: `SEPTA Stop #${stop.stopId}`,
+        url: window.location.href,
+      });
+    } else {
+      copy(window.location.href);
+    }
   };
 
   if (!stop) {
@@ -140,19 +135,32 @@ export default function StopPage() {
       <>
         <Header showBack title="Stop" />
         <div className="max-w-lg mx-auto px-4 py-8">
-          <ErrorState
-            title="Stop not found"
-            description={`We couldn't find a stop with ID ${stopId}`}
-          />
+          <div className="card p-8 text-center">
+            <MapPin className="w-12 h-12 text-text-muted mx-auto mb-4" />
+            <h2 className="text-lg font-semibold text-text-primary mb-2">Stop not found</h2>
+            <p className="text-sm text-text-secondary">
+              We couldn&apos;t find a stop with ID {stopId}
+            </p>
+          </div>
         </div>
       </>
     );
   }
 
-  // Get route details for this stop
   const stopRoutes = stop.routes
     .map((routeId) => SEPTA_ROUTES.find((r) => r.routeId === routeId))
     .filter(Boolean);
+
+  const getRouteColor = (type: TransitMode) => {
+    switch (type) {
+      case 'bus': return 'bg-mode-bus';
+      case 'trolley': return 'bg-mode-trolley';
+      case 'subway': return 'bg-mode-subway-mfl';
+      case 'regional_rail': return 'bg-mode-rail';
+      case 'nhsl': return 'bg-mode-nhsl';
+      default: return 'bg-mode-bus';
+    }
+  };
 
   return (
     <>
@@ -160,200 +168,192 @@ export default function StopPage() {
 
       <div className="max-w-lg mx-auto px-4 py-6 space-y-6">
         {/* Stop Header */}
-        <div>
-          <div className="flex items-start justify-between gap-4">
+        <div className="card p-6">
+          <div className="flex items-start justify-between gap-4 mb-4">
             <div className="flex-1 min-w-0">
-              <h1 className="text-2xl font-bold text-foreground">{stop.stopName}</h1>
-              <div className="flex items-center gap-3 mt-2">
-                <button
-                  onClick={handleCopy}
-                  className="flex items-center gap-1.5 font-mono text-sm bg-background-subtle px-2.5 py-1 rounded-lg hover:bg-border transition-colors"
-                >
-                  <span className="text-foreground-muted">Stop #</span>
-                  <span className="font-semibold text-foreground">{stop.stopId}</span>
-                  {copied ? (
-                    <Check className="w-3.5 h-3.5 text-live-green" />
-                  ) : (
-                    <Copy className="w-3.5 h-3.5 text-foreground-subtle" />
-                  )}
-                </button>
-                {stop.wheelchairAccessible && (
-                  <Badge variant="info">
-                    <Accessibility className="w-3 h-3" />
-                    Accessible
-                  </Badge>
+              <h1 className="text-xl font-bold text-text-primary leading-tight">
+                {stop.stopName}
+              </h1>
+              <button
+                onClick={() => copy(stopId)}
+                className="flex items-center gap-2 mt-2 px-3 py-1.5 bg-bg-tertiary rounded-lg hover:bg-bg-highlight transition-colors"
+              >
+                <span className="text-sm text-text-muted">Stop</span>
+                <span className="font-mono font-semibold text-text-primary">#{stop.stopId}</span>
+                {copied ? (
+                  <Check className="w-4 h-4 text-live" />
+                ) : (
+                  <Copy className="w-4 h-4 text-text-muted" />
                 )}
-              </div>
+              </button>
             </div>
             <div className="flex gap-2">
-              <IconButton onClick={handleFavorite} aria-label={isFavorite ? 'Remove from favorites' : 'Add to favorites'}>
-                <Heart
-                  className={`w-6 h-6 ${isFavorite ? 'fill-alert-red text-alert-red' : 'text-foreground-subtle'}`}
-                />
-              </IconButton>
+              <button
+                onClick={handleShare}
+                className="p-3 rounded-xl bg-bg-tertiary hover:bg-bg-highlight transition-colors"
+                aria-label="Share stop"
+              >
+                <Share2 className="w-5 h-5 text-text-secondary" />
+              </button>
+              <button
+                onClick={handleFavorite}
+                className={`p-3 rounded-xl transition-colors ${
+                  isFavorite 
+                    ? 'bg-urgent/10 text-urgent' 
+                    : 'bg-bg-tertiary hover:bg-bg-highlight text-text-secondary'
+                }`}
+                aria-label={isFavorite ? 'Remove from favorites' : 'Add to favorites'}
+              >
+                <Heart className={`w-5 h-5 ${isFavorite ? 'fill-current' : ''}`} />
+              </button>
             </div>
           </div>
 
-          {/* Routes at this stop */}
-          <div className="flex flex-wrap gap-2 mt-4">
+          {/* Route Badges */}
+          <div className="flex flex-wrap gap-2">
             {stopRoutes.map((route) => (
-              <RouteChip
-                key={route!.routeId}
-                routeId={route!.routeShortName}
-                routeType={route!.routeType}
-                size="md"
-              />
+              <Link key={route!.routeId} href={`/route/${route!.routeId}`}>
+                <span className={`${getRouteColor(route!.routeType)} route-badge text-white hover:scale-105 transition-transform inline-block`}>
+                  {route!.routeShortName}
+                </span>
+              </Link>
             ))}
           </div>
         </div>
 
-        {/* Alerts Banner */}
-        {alerts.length > 0 && <AlertBanner alerts={alerts} />}
-
-        {/* Real-time Arrivals */}
-        <section>
-          <CardHeader>
-            <div className="flex items-center gap-2">
-              <Clock className="w-5 h-5 text-septa-gold" />
-              <CardTitle>Arrivals</CardTitle>
+        {/* Alert Banner */}
+        {alerts.length > 0 && (
+          <Link href="/alerts">
+            <div className="flex items-center gap-3 p-4 rounded-xl bg-urgent/10 border border-urgent/20">
+              <AlertTriangle className="w-5 h-5 text-urgent flex-shrink-0" />
+              <div className="flex-1 min-w-0">
+                <p className="text-sm font-medium text-urgent">
+                  {alerts.length} alert{alerts.length > 1 ? 's' : ''} affecting this stop
+                </p>
+                <p className="text-xs text-text-muted truncate mt-0.5">
+                  {alerts[0]?.title}
+                </p>
+              </div>
             </div>
+          </Link>
+        )}
+
+        {/* Arrivals */}
+        <section>
+          <div className="flex items-center justify-between mb-4">
             <div className="flex items-center gap-2">
+              <h2 className="text-lg font-bold text-text-primary">Arriving</h2>
               {lastUpdated && (
-                <span className="text-xs text-foreground-subtle">
+                <span className="text-xs text-text-muted">
                   {lastUpdated.toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' })}
                 </span>
               )}
-              <IconButton
-                onClick={() => fetchArrivals(true)}
-                disabled={isRefreshing}
-                aria-label="Refresh arrivals"
-              >
-                <RefreshCw className={`w-4 h-4 ${isRefreshing ? 'animate-spin' : ''}`} />
-              </IconButton>
             </div>
-          </CardHeader>
+            <button 
+              onClick={() => fetchArrivals(false)}
+              className="p-2 rounded-lg hover:bg-bg-tertiary transition-colors"
+              disabled={isRefreshing}
+            >
+              <RefreshCw className={`w-4 h-4 text-text-muted ${isRefreshing ? 'animate-spin' : ''}`} />
+            </button>
+          </div>
 
-          {/* Data quality indicator */}
-          {!isLoading && arrivals.length > 0 && (
-            <div className="flex items-center gap-2 mb-3">
-              {isStale && (
-                <Badge variant="estimated">
-                  <AlertTriangle className="w-3 h-3" />
-                  Cached data
-                </Badge>
-              )}
-              {!isOnline && (
-                <Badge variant="no-data">Offline</Badge>
-              )}
-            </div>
-          )}
-
-          <Card variant="elevated" padding="none">
+          <div className="card">
             {isLoading ? (
-              <div>
-                <ArrivalSkeleton />
-                <ArrivalSkeleton />
-                <ArrivalSkeleton />
+              <div className="p-4 space-y-3">
+                <DepartureRowSkeleton />
+                <DepartureRowSkeleton />
+                <DepartureRowSkeleton />
               </div>
-            ) : error && arrivals.length === 0 ? (
-              <div className="p-4">
-                <ErrorState
-                  title="Couldn't load arrivals"
-                  description={error}
-                  onRetry={() => fetchArrivals()}
-                  isOffline={!isOnline}
-                />
+            ) : error ? (
+              <div className="p-8 text-center">
+                <AlertTriangle className="w-10 h-10 text-delayed mx-auto mb-3" />
+                <p className="text-sm text-text-secondary">{error}</p>
+                <button
+                  onClick={() => fetchArrivals()}
+                  className="btn btn-secondary mt-4"
+                >
+                  Try again
+                </button>
               </div>
             ) : arrivals.length === 0 ? (
-              <div className="p-4">
-                <NoArrivalsState stopName={stop.stopName} />
+              <div className="p-8 text-center">
+                <MapPin className="w-10 h-10 text-text-muted mx-auto mb-3" />
+                <p className="font-medium text-text-primary">No upcoming arrivals</p>
+                <p className="text-sm text-text-secondary mt-1">
+                  Check back later or view the schedule
+                </p>
               </div>
             ) : (
               <div className="p-4">
-                <ArrivalList arrivals={arrivals} showRoute maxItems={10} />
+                {arrivals.slice(0, 10).map((arrival, index) => {
+                  const route = SEPTA_ROUTES.find(r => r.routeId === arrival.routeId);
+                  return (
+                    <DepartureRowCompact
+                      key={`${arrival.tripId}-${index}`}
+                      arrival={arrival}
+                      stopName={stop.stopName}
+                      routeType={route?.routeType}
+                    />
+                  );
+                })}
               </div>
             )}
-          </Card>
+          </div>
 
-          {/* Tracking legend */}
+          {/* Tracking Legend */}
           {arrivals.length > 0 && (
-            <div className="mt-4 p-3 bg-background-subtle rounded-lg">
-              <p className="text-xs font-medium text-foreground-muted mb-2">Understanding arrival times</p>
-              <div className="flex flex-wrap gap-3">
-                <div className="flex items-center gap-1.5">
-                  <TrackingBadge status="live" />
-                  <span className="text-xs text-foreground-subtle">GPS tracked</span>
-                </div>
-                <div className="flex items-center gap-1.5">
-                  <TrackingBadge status="estimated" />
-                  <span className="text-xs text-foreground-subtle">Based on schedule</span>
-                </div>
-                <div className="flex items-center gap-1.5">
-                  <TrackingBadge status="no_data" />
-                  <span className="text-xs text-foreground-subtle">No current data</span>
-                </div>
+            <div className="flex items-center gap-4 mt-3 text-xs text-text-muted">
+              <div className="flex items-center gap-1.5">
+                <span className="live-dot w-[6px] h-[6px]" />
+                <span>Live GPS</span>
               </div>
+              <span>•</span>
+              <span>Times may vary based on traffic</span>
             </div>
           )}
         </section>
 
-        {/* Routes at this Stop */}
+        {/* Routes at Stop */}
         <section>
-          <CardHeader>
-            <CardTitle>Routes at this stop</CardTitle>
-          </CardHeader>
-          <Card variant="outlined" padding="none">
-            <div className="divide-y divide-border">
-              {stopRoutes.map((route) => (
-                <Link
-                  key={route!.routeId}
-                  href={`/route/${route!.routeId}`}
-                  className="flex items-center gap-3 p-3 hover:bg-background-subtle transition-colors"
-                >
-                  <div
-                    className={`
-                      w-12 h-10 rounded-lg flex items-center justify-center
-                      font-mono font-bold text-white
-                      ${route!.routeType === 'bus' ? 'bg-[#004F9F]' : ''}
-                      ${route!.routeType === 'trolley' ? 'bg-[#00A550]' : ''}
-                      ${route!.routeType === 'subway' ? 'bg-[#0066CC]' : ''}
-                      ${route!.routeType === 'regional_rail' ? 'bg-[#91456C]' : ''}
-                      ${route!.routeType === 'nhsl' ? 'bg-[#9B2D9B]' : ''}
-                    `}
-                  >
+          <h2 className="text-lg font-bold text-text-primary mb-4">Routes here</h2>
+          <div className="space-y-2">
+            {stopRoutes.map((route) => (
+              <Link key={route!.routeId} href={`/route/${route!.routeId}`}>
+                <div className="card p-4 flex items-center gap-4 hover:bg-bg-highlight transition-colors">
+                  <span className={`${getRouteColor(route!.routeType)} route-badge text-white min-w-[52px] text-center`}>
                     {route!.routeShortName}
-                  </div>
+                  </span>
                   <div className="flex-1 min-w-0">
-                    <p className="font-medium text-foreground">{route!.routeLongName}</p>
-                    <p className="text-sm text-foreground-muted">
+                    <p className="font-medium text-text-primary">{route!.routeLongName}</p>
+                    <p className="text-sm text-text-muted truncate">
                       {route!.directions.map((d) => d.destinationName).join(' ↔ ')}
                     </p>
                   </div>
-                </Link>
-              ))}
-            </div>
-          </Card>
+                </div>
+              </Link>
+            ))}
+          </div>
         </section>
 
         {/* Quick Actions */}
-        <div className="grid grid-cols-2 gap-3">
-          <Button
-            variant="secondary"
-            leftIcon={<ExternalLink className="w-4 h-4" />}
+        <div className="flex gap-3">
+          <button
             onClick={() => window.open(`https://www.google.com/maps?q=${stop.lat},${stop.lng}`, '_blank')}
+            className="btn btn-secondary flex-1"
           >
+            <ExternalLink className="w-4 h-4" />
             Open in Maps
-          </Button>
-          <Button
-            variant="ghost"
-            leftIcon={<Copy className="w-4 h-4" />}
-            onClick={handleCopy}
+          </button>
+          <button
+            onClick={() => copy(stopId)}
+            className="btn btn-secondary flex-1"
           >
-            {copied ? 'Copied!' : 'Copy Stop ID'}
-          </Button>
+            {copied ? <Check className="w-4 h-4" /> : <Copy className="w-4 h-4" />}
+            {copied ? 'Copied!' : 'Copy ID'}
+          </button>
         </div>
       </div>
     </>
   );
 }
-
