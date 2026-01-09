@@ -1,546 +1,287 @@
-import type {
-  Stop,
-  Route,
-  Arrival,
-  Alert,
-  NearbyStop,
-  TrackingStatus,
-  TransitMode,
-  ApiResponse,
-  CacheEntry,
-} from './types';
+import { cookies } from 'next/headers';
 
-// API Base URL - use local proxy routes to avoid CORS issues
-const API_BASE = '/api';
+/**
+ * SEPTA Key API Client (Reverse Engineered)
+ */
 
-// Cache configuration
-const CACHE_DURATION = {
-  arrivals: 30 * 1000, // 30 seconds
-  stops: 24 * 60 * 60 * 1000, // 24 hours
-  routes: 24 * 60 * 60 * 1000, // 24 hours
-  alerts: 5 * 60 * 1000, // 5 minutes
+const SEPTA_API_BASE = 'https://www.septakey.org/api/v1';
+
+const COMMON_HEADERS = {
+  'Accept': '*/*',
+  'Accept-Language': 'en-US,en;q=0.9',
+  'Content-Type': 'application/json',
+  'X-Api-Source': 'WCI9Exs',
+  'User-Agent': 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+  'Sec-Ch-Ua': '"Google Chrome";v="120", "Chromium";v="120", "Not?A_Brand";v="24"',
+  'Sec-Ch-Ua-Mobile': '?0',
+  'Sec-Ch-Ua-Platform': '"macOS"',
+  'Origin': 'https://www.septakey.org',
+  'Referer': 'https://www.septakey.org/',
 };
 
-// In-memory cache
-const cache = new Map<string, CacheEntry<unknown>>();
-
-function getCached<T>(key: string): T | null {
-  const entry = cache.get(key) as CacheEntry<T> | undefined;
-  if (!entry) return null;
-  if (Date.now() > entry.expiresAt) {
-    cache.delete(key);
-    return null;
-  }
-  return entry.data;
+interface LoginResult {
+  success: boolean;
+  data?: any;
+  error?: string;
 }
 
-function setCache<T>(key: string, data: T, duration: number): void {
-  cache.set(key, {
-    data,
-    timestamp: Date.now(),
-    expiresAt: Date.now() + duration,
-  });
-}
-
-// Helper to safely fetch with timeout
-async function fetchWithTimeout(
-  url: string,
-  options: RequestInit = {},
-  timeout = 10000
-): Promise<Response> {
-  const controller = new AbortController();
-  const id = setTimeout(() => controller.abort(), timeout);
-
+export async function loginToSepta(username: string, password: string): Promise<LoginResult> {
   try {
-    const response = await fetch(url, {
-      ...options,
-      signal: controller.signal,
+    // 1. LOGIN
+    const credentials = Buffer.from(`${username}:${password}`).toString('base64');
+    
+    // Body must be empty/null with Content-Length: 0
+    const loginResponse = await fetch(`${SEPTA_API_BASE}/login`, {
+      method: 'POST',
+      headers: {
+        ...COMMON_HEADERS,
+        'X-Authorization': `X-Basic ${credentials}`,
+        'Content-Length': '0', 
+      },
     });
-    clearTimeout(id);
-    return response;
-  } catch (error) {
-    clearTimeout(id);
-    throw error;
-  }
-}
 
-// API Functions
-
-export async function getBusArrivals(stopId: string): Promise<ApiResponse<Arrival[]>> {
-  const cacheKey = `arrivals-bus-${stopId}`;
-  const cached = getCached<Arrival[]>(cacheKey);
-
-  if (cached) {
-    return {
-      data: cached,
-      error: null,
-      isStale: false,
-      lastUpdated: new Date().toISOString(),
-    };
-  }
-
-  try {
-    // Use local proxy API route
-    const response = await fetchWithTimeout(
-      `${API_BASE}/arrivals?stop_id=${stopId}`
-    );
-
-    if (!response.ok) {
-      throw new Error(`API returned ${response.status}`);
-    }
-
-    const rawData = await response.json();
-    const arrivals = transformBusArrivals(rawData, stopId);
-
-    setCache(cacheKey, arrivals, CACHE_DURATION.arrivals);
-
-    return {
-      data: arrivals,
-      error: null,
-      isStale: false,
-      lastUpdated: new Date().toISOString(),
-    };
-  } catch (error) {
-    // Try to return stale cache if available
-    const staleEntry = cache.get(cacheKey) as CacheEntry<Arrival[]> | undefined;
-    if (staleEntry) {
-      return {
-        data: staleEntry.data,
-        error: 'Using cached data - live updates unavailable',
-        isStale: true,
-        lastUpdated: new Date(staleEntry.timestamp).toISOString(),
+    if (!loginResponse.ok) {
+      const errorText = await loginResponse.text();
+      console.error(`[SEPTA-API] Login failed (${loginResponse.status}):`, errorText);
+      return { 
+        success: false, 
+        error: `Login failed: ${loginResponse.status} ${loginResponse.statusText}`
       };
     }
 
-    return {
-      data: null,
-      error: error instanceof Error ? error.message : 'Failed to fetch arrivals',
-      isStale: false,
-      lastUpdated: null,
-    };
-  }
-}
-
-export async function getRealTimeArrivals(stopId: string): Promise<ApiResponse<Arrival[]>> {
-  const cacheKey = `arrivals-realtime-${stopId}`;
-  const cached = getCached<Arrival[]>(cacheKey);
-
-  if (cached) {
-    return {
-      data: cached,
-      error: null,
-      isStale: false,
-      lastUpdated: new Date().toISOString(),
-    };
-  }
-
-  try {
-    // Use local proxy API route
-    const response = await fetchWithTimeout(
-      `${API_BASE}/realtime?stop_id=${stopId}`
-    );
-
-    if (!response.ok) {
-      throw new Error(`API returned ${response.status}`);
+    const loginData = await loginResponse.json();
+    const accessToken = loginData.access_token || loginData.token;
+    
+    // Capture cookies - robust handling for Node/Next.js environments
+    let cookiesArray: string[] = [];
+    // @ts-ignore - getSetCookie is newer standard
+    if (typeof loginResponse.headers.getSetCookie === 'function') {
+      // @ts-ignore
+      cookiesArray = loginResponse.headers.getSetCookie();
+    } else if (loginResponse.headers.has('set-cookie')) {
+      const headerVal = loginResponse.headers.get('set-cookie');
+      if (headerVal) {
+        cookiesArray = [headerVal]; 
+      }
     }
+    const cookieString = cookiesArray.map(c => c.split(';')[0]).join('; ');
 
-    const rawData = await response.json();
-    const arrivals = transformRealTimeArrivals(rawData);
+    // 2. DISCOVER USER ID
+    let userIdString = findStringId(loginData) || extractUserIdFromJwt(accessToken);
+    
+    // If not found, try robust profile fetch
+    if (!userIdString) {
+        // Try to fetch profile and see if we can get ID from there
+        const profileRes = await fetchUserProfile(accessToken || '', cookieString);
+        if (profileRes.id) {
+            userIdString = profileRes.id;
+        }
+    }
+    
+    // 3. FETCH WALLET DATA
+    let walletData = null;
 
-    setCache(cacheKey, arrivals, CACHE_DURATION.arrivals);
+    if (userIdString) {
+      const walletUrl = `${SEPTA_API_BASE}/indv_users/${userIdString}/keycard_details`;
+      
+      const walletResponse = await fetch(walletUrl, {
+        method: 'GET',
+        headers: {
+          ...COMMON_HEADERS,
+          'Cookie': cookieString,
+          'X-Authorization': `Bearer ${accessToken}`, 
+        },
+      });
 
-    return {
-      data: arrivals,
-      error: null,
-      isStale: false,
-      lastUpdated: new Date().toISOString(),
-    };
-  } catch (error) {
-    const staleEntry = cache.get(cacheKey) as CacheEntry<Arrival[]> | undefined;
-    if (staleEntry) {
+      if (walletResponse.ok) {
+        walletData = await walletResponse.json();
+      } else {
+        const errText = await walletResponse.text();
+        console.error(`[SEPTA-API] Wallet fetch failed (${walletResponse.status}): ${errText}`);
+        return {
+            success: false,
+            error: `Wallet fetch failed: ${walletResponse.status}`
+        };
+      }
+    } else {
+      console.error('[SEPTA-API] Could not find User ID to fetch wallet');
       return {
-        data: staleEntry.data,
-        error: 'Using cached data - live updates unavailable',
-        isStale: true,
-        lastUpdated: new Date(staleEntry.timestamp).toISOString(),
+          success: false,
+          error: 'Could not find User ID'
       };
     }
 
-    return {
-      data: null,
-      error: error instanceof Error ? error.message : 'Failed to fetch arrivals',
-      isStale: false,
-      lastUpdated: null,
+    return { 
+      success: true, 
+      data: walletData || loginData
     };
-  }
-}
 
-export async function getTransitView(routeId: string): Promise<ApiResponse<unknown>> {
-  try {
-    // Use local proxy API route
-    const response = await fetchWithTimeout(
-      `${API_BASE}/transitview?route=${routeId}`
-    );
-
-    if (!response.ok) {
-      throw new Error(`API returned ${response.status}`);
-    }
-
-    const data = await response.json();
-    return {
-      data,
-      error: null,
-      isStale: false,
-      lastUpdated: new Date().toISOString(),
-    };
   } catch (error) {
-    return {
-      data: null,
-      error: error instanceof Error ? error.message : 'Failed to fetch transit view',
-      isStale: false,
-      lastUpdated: null,
-    };
+    console.error('[SEPTA-API] Error:', error);
+    return { success: false, error: error instanceof Error ? error.message : 'Unknown error' };
   }
 }
 
-export async function getAlerts(): Promise<ApiResponse<Alert[]>> {
-  const cacheKey = 'alerts';
-  const cached = getCached<Alert[]>(cacheKey);
-
-  if (cached) {
-    return {
-      data: cached,
-      error: null,
-      isStale: false,
-      lastUpdated: new Date().toISOString(),
-    };
-  }
-
+function parseJwt(token: string) {
   try {
-    // Use local proxy API route
-    const response = await fetchWithTimeout(`${API_BASE}/alerts`);
-
-    if (!response.ok) {
-      throw new Error(`API returned ${response.status}`);
-    }
-
-    const rawData = await response.json();
-    const alerts = transformAlerts(rawData);
-
-    setCache(cacheKey, alerts, CACHE_DURATION.alerts);
-
-    return {
-      data: alerts,
-      error: null,
-      isStale: false,
-      lastUpdated: new Date().toISOString(),
-    };
-  } catch (error) {
-    const staleEntry = cache.get(cacheKey) as CacheEntry<Alert[]> | undefined;
-    if (staleEntry) {
-      return {
-        data: staleEntry.data,
-        error: 'Using cached data',
-        isStale: true,
-        lastUpdated: new Date(staleEntry.timestamp).toISOString(),
-      };
-    }
-
-    return {
-      data: null,
-      error: error instanceof Error ? error.message : 'Failed to fetch alerts',
-      isStale: false,
-      lastUpdated: null,
-    };
-  }
-}
-
-export async function getRouteAlerts(routeId: string): Promise<ApiResponse<Alert[]>> {
-  try {
-    // Use local proxy API route
-    const response = await fetchWithTimeout(
-      `${API_BASE}/alerts?route=${routeId}`
-    );
-
-    if (!response.ok) {
-      throw new Error(`API returned ${response.status}`);
-    }
-
-    const rawData = await response.json();
-    const alerts = transformAlerts(rawData);
-
-    return {
-      data: alerts,
-      error: null,
-      isStale: false,
-      lastUpdated: new Date().toISOString(),
-    };
-  } catch (error) {
-    return {
-      data: null,
-      error: error instanceof Error ? error.message : 'Failed to fetch alerts',
-      isStale: false,
-      lastUpdated: null,
-    };
-  }
-}
-
-// Transform functions to normalize SEPTA API responses
-
-function transformBusArrivals(rawData: unknown, stopId: string): Arrival[] {
-  if (!rawData || typeof rawData !== 'object') return [];
-
-  const arrivals: Arrival[] = [];
-  const data = rawData as Record<string, unknown[]>;
-
-  // SEPTA returns data keyed by route
-  for (const [routeId, trips] of Object.entries(data)) {
-    if (!Array.isArray(trips)) continue;
-
-    for (const trip of trips) {
-      const tripData = trip as Record<string, unknown>;
-      const arrival = parseArrival(tripData, routeId);
-      if (arrival) arrivals.push(arrival);
-    }
-  }
-
-  return arrivals.sort((a, b) => a.minutesUntilArrival - b.minutesUntilArrival);
-}
-
-function transformRealTimeArrivals(rawData: unknown): Arrival[] {
-  if (!rawData || typeof rawData !== 'object') return [];
-
-  const arrivals: Arrival[] = [];
-  const data = rawData as Record<string, unknown>;
-
-  // Check if it's an error response
-  if (data.error) {
-    console.error('SEPTA API error:', data.error);
-    return [];
-  }
-
-  // BusSchedules API returns data keyed by route number
-  // Format: { "17": [...arrivals], "33": [...arrivals], etc }
-  for (const [routeId, trips] of Object.entries(data)) {
-    if (!Array.isArray(trips)) continue;
-
-    for (const trip of trips) {
-      const tripData = trip as Record<string, unknown>;
-      const arrival = parseArrival(tripData, routeId);
-      if (arrival) arrivals.push(arrival);
-    }
-  }
-
-  return arrivals.sort((a, b) => a.minutesUntilArrival - b.minutesUntilArrival);
-}
-
-function parseArrival(tripData: Record<string, unknown>, routeId: string): Arrival | null {
-  try {
-    const dateStr = String(tripData.DateCalender || tripData.date || '');
-    const direction = String(tripData.Direction || tripData.direction || '');
-
-    // Parse arrival time
-    let minutesUntil = 0;
-    if (tripData.minutes !== undefined) {
-      minutesUntil = Number(tripData.minutes);
-    } else if (dateStr) {
-      const arrivalDate = new Date(dateStr);
-      minutesUntil = Math.max(0, Math.round((arrivalDate.getTime() - Date.now()) / 60000));
-    }
-
-    return {
-      tripId: String(tripData.trip_id || tripData.TripID || Math.random()),
-      routeId,
-      routeShortName: routeId,
-      direction,
-      destinationName: String(tripData.DirectionDesc || tripData.destination || direction),
-      arrivalTime: dateStr || new Date(Date.now() + minutesUntil * 60000).toISOString(),
-      minutesUntilArrival: minutesUntil,
-      trackingStatus: determineTrackingStatus(tripData),
-      vehicleId: tripData.VehicleID ? String(tripData.VehicleID) : undefined,
-      lastUpdated: tripData.Offset ? new Date().toISOString() : undefined,
-      isDelayed: Boolean(tripData.late && Number(tripData.late) > 5),
-      delayMinutes: tripData.late ? Number(tripData.late) : undefined,
-      scheduledTime: tripData.scheduled ? String(tripData.scheduled) : undefined,
-    };
+    return JSON.parse(Buffer.from(token.split('.')[1], 'base64').toString());
   } catch {
     return null;
   }
 }
 
-function determineTrackingStatus(data: Record<string, unknown>): TrackingStatus {
-  // Check for real-time indicators
-  if (data.Offset !== undefined || data.VehicleID || data.lat) {
-    return 'live';
-  }
-  if (data.estimated === true || data.late !== undefined) {
-    return 'estimated';
-  }
-  if (data.scheduled === true) {
-    return 'scheduled';
-  }
-  return 'no_data';
+function extractUserIdFromJwt(token: string): string | null {
+  if (!token) return null;
+  const payload = parseJwt(token);
+  if (!payload) return null;
+  
+  // Look for alphanumeric strings that look like IDs
+  if (payload.contact_id && typeof payload.contact_id === 'string') return payload.contact_id;
+  if (payload.sub && typeof payload.sub === 'string' && payload.sub.length > 10) return payload.sub;
+  if (payload.userId && typeof payload.userId === 'string' && payload.userId.length > 10) return payload.userId;
+  if (payload.user_id && typeof payload.user_id === 'string' && payload.user_id.length > 10) return payload.user_id;
+
+  return null;
 }
 
-function transformAlerts(rawData: unknown): Alert[] {
-  if (!Array.isArray(rawData)) return [];
+/**
+ * Recursively find a likely User ID (string, length 10-20) in an object
+ */
+function findStringId(obj: any): string | null {
+  if (!obj || typeof obj !== 'object') return null;
+  
+  // High priority keys
+  const priorityKeys = ['contact_id', 'user_id', 'userId', 'publicId', 'code', 'key'];
+  for (const key of priorityKeys) {
+    if (obj[key] && typeof obj[key] === 'string' && obj[key].length > 10 && obj[key].length < 30) {
+      return obj[key];
+    }
+  }
 
-  return rawData
-    .map((alert) => {
-      const alertData = alert as Record<string, unknown>;
-      return {
-        alertId: String(alertData.alert_id || alertData.id || Math.random()),
-        routeId: alertData.route_id ? String(alertData.route_id) : undefined,
-        stopId: alertData.stop_id ? String(alertData.stop_id) : undefined,
-        severity: determineSeverity(alertData),
-        title: String(alertData.current_message || alertData.title || 'Service Alert'),
-        description: String(alertData.advisory_message || alertData.description || ''),
-        startTime: String(alertData.start_time || new Date().toISOString()),
-        endTime: alertData.end_time ? String(alertData.end_time) : undefined,
-        affectedRoutes: parseAffectedItems(alertData.route_id || alertData.routes),
-        affectedStops: parseAffectedItems(alertData.stop_id || alertData.stops),
+  // Deep search
+  for (const key in obj) {
+      if (typeof obj[key] === 'string') {
+        // If it looks like an ID
+        if (key.toLowerCase().includes('id') && obj[key].length > 10 && obj[key].length < 30 && !obj[key].includes(' ')) {
+          return obj[key];
+        }
+      } else if (typeof obj[key] === 'object') {
+        const found = findStringId(obj[key]);
+        if (found) return found;
+      }
+  }
+  return null;
+}
+
+async function fetchUserProfile(token: string, cookies: string): Promise<{id: string | null, data: any}> {
+  const headers = {
+    ...COMMON_HEADERS,
+    'Cookie': cookies,
+    'X-Authorization': `Bearer ${token}`,
+  };
+
+  const endpoints = [
+    `${SEPTA_API_BASE}/indv_users/profile`,
+    `${SEPTA_API_BASE}/users/current`,
+    `${SEPTA_API_BASE}/account`,
+    `${SEPTA_API_BASE}/auth/user`,
+  ];
+
+  for (const url of endpoints) {
+    try {
+      const res = await fetch(url, { method: 'GET', headers });
+      if (res.ok) {
+        const data = await res.json();
+        const id = findStringId(data);
+        if (id) {
+            return { id, data };
+        }
+        return { id: null, data };
+      }
+    } catch (e) { 
+        // Silent fail
+    }
+  }
+  return { id: null, data: null };
+}
+
+export function formatSeptaData(apiData: any) {
+  // Safety check: Handle null/undefined data
+  if (!apiData) {
+      return { 
+          balance: 0, 
+          cardNumber: null, 
+          pass: null, 
+          lastUpdated: new Date().toISOString(), 
+          raw: null 
       };
-    })
-    .filter((alert) => alert.title);
-}
-
-function determineSeverity(data: Record<string, unknown>): 'info' | 'warning' | 'severe' {
-  const severity = String(data.severity || data.alert_type || '').toLowerCase();
-  if (severity.includes('severe') || severity.includes('emergency')) return 'severe';
-  if (severity.includes('warning') || severity.includes('delay')) return 'warning';
-  return 'info';
-}
-
-function parseAffectedItems(items: unknown): string[] {
-  if (!items) return [];
-  if (typeof items === 'string') return [items];
-  if (Array.isArray(items)) return items.map(String);
-  return [];
-}
-
-// Static data for routes and stops (would be fetched from GTFS in production)
-export const SEPTA_ROUTES: Route[] = [
-  // Bus Routes
-  { routeId: '17', routeShortName: '17', routeLongName: '20th-Johnston', routeType: 'bus', routeColor: '004F9F', directions: [{ directionId: 0, directionName: 'Northbound', destinationName: '20th & Olney' }, { directionId: 1, directionName: 'Southbound', destinationName: '20th & Johnston' }] },
-  { routeId: '21', routeShortName: '21', routeLongName: '21st Street', routeType: 'bus', routeColor: '004F9F', directions: [{ directionId: 0, directionName: 'Northbound', destinationName: 'Ogontz' }, { directionId: 1, directionName: 'Southbound', destinationName: 'Oregon' }] },
-  { routeId: '23', routeShortName: '23', routeLongName: '23rd-Germantown', routeType: 'bus', routeColor: '004F9F', directions: [{ directionId: 0, directionName: 'Northbound', destinationName: 'Chestnut Hill' }, { directionId: 1, directionName: 'Southbound', destinationName: '11th & Oregon' }] },
-  { routeId: '42', routeShortName: '42', routeLongName: 'Spruce-Pine', routeType: 'bus', routeColor: '004F9F', directions: [{ directionId: 0, directionName: 'Eastbound', destinationName: 'Penn\'s Landing' }, { directionId: 1, directionName: 'Westbound', destinationName: '46th & Market' }] },
-  { routeId: '47', routeShortName: '47', routeLongName: '5th Street-Whitman Plaza', routeType: 'bus', routeColor: '004F9F', directions: [{ directionId: 0, directionName: 'Northbound', destinationName: '8th & Spring Garden' }, { directionId: 1, directionName: 'Southbound', destinationName: 'Whitman Plaza' }] },
-  { routeId: 'LUCY', routeShortName: 'LUCY', routeLongName: 'Loop through University City', routeType: 'bus', routeColor: '9B59B6', directions: [{ directionId: 0, directionName: 'Loop', destinationName: 'University City' }] },
-  
-  // Trolley Routes
-  { routeId: '10', routeShortName: '10', routeLongName: 'Lancaster-Overbrook', routeType: 'trolley', routeColor: '00A550', directions: [{ directionId: 0, directionName: 'Westbound', destinationName: 'Malvern Loop' }, { directionId: 1, directionName: 'Eastbound', destinationName: '13th & Market' }] },
-  { routeId: '11', routeShortName: '11', routeLongName: 'Woodland', routeType: 'trolley', routeColor: '00A550', directions: [{ directionId: 0, directionName: 'Westbound', destinationName: 'Darby' }, { directionId: 1, directionName: 'Eastbound', destinationName: '13th & Market' }] },
-  { routeId: '13', routeShortName: '13', routeLongName: 'Chester', routeType: 'trolley', routeColor: '00A550', directions: [{ directionId: 0, directionName: 'Westbound', destinationName: 'Yeadon Loop' }, { directionId: 1, directionName: 'Eastbound', destinationName: '13th & Market' }] },
-  { routeId: '34', routeShortName: '34', routeLongName: 'Baltimore-61st', routeType: 'trolley', routeColor: '00A550', directions: [{ directionId: 0, directionName: 'Westbound', destinationName: '61st-Baltimore' }, { directionId: 1, directionName: 'Eastbound', destinationName: '13th & Market' }] },
-  { routeId: '36', routeShortName: '36', routeLongName: 'Eastwick', routeType: 'trolley', routeColor: '00A550', directions: [{ directionId: 0, directionName: 'Westbound', destinationName: 'Eastwick Loop' }, { directionId: 1, directionName: 'Eastbound', destinationName: '13th & Market' }] },
-  
-  // Subway
-  { routeId: 'MFL', routeShortName: 'MFL', routeLongName: 'Market-Frankford Line', routeType: 'subway', routeColor: '0066CC', directions: [{ directionId: 0, directionName: 'Eastbound', destinationName: 'Frankford' }, { directionId: 1, directionName: 'Westbound', destinationName: '69th Street' }] },
-  { routeId: 'BSL', routeShortName: 'BSL', routeLongName: 'Broad Street Line', routeType: 'subway', routeColor: 'F37021', directions: [{ directionId: 0, directionName: 'Northbound', destinationName: 'Fern Rock' }, { directionId: 1, directionName: 'Southbound', destinationName: 'NRG Station' }] },
-  
-  // Regional Rail
-  { routeId: 'AIR', routeShortName: 'AIR', routeLongName: 'Airport Line', routeType: 'regional_rail', routeColor: '91456C', directions: [{ directionId: 0, directionName: 'To Airport', destinationName: 'Airport' }, { directionId: 1, directionName: 'To Center City', destinationName: 'Temple University' }] },
-  { routeId: 'CHE', routeShortName: 'CHE', routeLongName: 'Chestnut Hill East', routeType: 'regional_rail', routeColor: '91456C', directions: [{ directionId: 0, directionName: 'Outbound', destinationName: 'Chestnut Hill East' }, { directionId: 1, directionName: 'Inbound', destinationName: 'Temple University' }] },
-  { routeId: 'CHW', routeShortName: 'CHW', routeLongName: 'Chestnut Hill West', routeType: 'regional_rail', routeColor: '91456C', directions: [{ directionId: 0, directionName: 'Outbound', destinationName: 'Chestnut Hill West' }, { directionId: 1, directionName: 'Inbound', destinationName: 'Temple University' }] },
-  { routeId: 'LAN', routeShortName: 'LAN', routeLongName: 'Lansdale/Doylestown', routeType: 'regional_rail', routeColor: '91456C', directions: [{ directionId: 0, directionName: 'Outbound', destinationName: 'Doylestown' }, { directionId: 1, directionName: 'Inbound', destinationName: 'Temple University' }] },
-  { routeId: 'MED', routeShortName: 'MED', routeLongName: 'Media/Wawa', routeType: 'regional_rail', routeColor: '91456C', directions: [{ directionId: 0, directionName: 'Outbound', destinationName: 'Wawa' }, { directionId: 1, directionName: 'Inbound', destinationName: 'Temple University' }] },
-  { routeId: 'PAO', routeShortName: 'PAO', routeLongName: 'Paoli/Thorndale', routeType: 'regional_rail', routeColor: '91456C', directions: [{ directionId: 0, directionName: 'Outbound', destinationName: 'Thorndale' }, { directionId: 1, directionName: 'Inbound', destinationName: 'Temple University' }] },
-  { routeId: 'TRE', routeShortName: 'TRE', routeLongName: 'Trenton', routeType: 'regional_rail', routeColor: '91456C', directions: [{ directionId: 0, directionName: 'Outbound', destinationName: 'Trenton' }, { directionId: 1, directionName: 'Inbound', destinationName: 'Temple University' }] },
-  { routeId: 'WAR', routeShortName: 'WAR', routeLongName: 'Warminster', routeType: 'regional_rail', routeColor: '91456C', directions: [{ directionId: 0, directionName: 'Outbound', destinationName: 'Warminster' }, { directionId: 1, directionName: 'Inbound', destinationName: 'Temple University' }] },
-  { routeId: 'WIL', routeShortName: 'WIL', routeLongName: 'Wilmington/Newark', routeType: 'regional_rail', routeColor: '91456C', directions: [{ directionId: 0, directionName: 'Outbound', destinationName: 'Newark' }, { directionId: 1, directionName: 'Inbound', destinationName: 'Temple University' }] },
-  
-  // NHSL
-  { routeId: 'NHSL', routeShortName: 'NHSL', routeLongName: 'Norristown High Speed Line', routeType: 'nhsl', routeColor: '9B2D9B', directions: [{ directionId: 0, directionName: 'Outbound', destinationName: 'Norristown' }, { directionId: 1, directionName: 'Inbound', destinationName: '69th Street' }] },
-];
-
-// Sample stops with REAL SEPTA stop IDs
-export const SAMPLE_STOPS: Stop[] = [
-  { stopId: '10263', stopName: 'Market St & 13th St', lat: 39.9517, lng: -75.1608, routes: ['17', '33', '48'], wheelchairAccessible: true },
-  { stopId: '20724', stopName: '30th St Station', lat: 39.9557, lng: -75.1822, routes: ['30', '31', '42', '44', 'LUCY'], wheelchairAccessible: true },
-  { stopId: '615', stopName: 'Broad St & Market St', lat: 39.9526, lng: -75.1635, routes: ['4', '16', '17', '23', '27', '32', '47'], wheelchairAccessible: true },
-  { stopId: '11388', stopName: '69th St Transportation Center', lat: 39.9694, lng: -75.2593, routes: ['101', '102', '104', '109', '110', '111', '112', '113'], wheelchairAccessible: true },
-  { stopId: '10262', stopName: 'Market St & 15th St', lat: 39.9522, lng: -75.1652, routes: ['17', '33', '44'], wheelchairAccessible: true },
-  { stopId: '552', stopName: 'Broad St & Cecil B Moore Ave', lat: 39.9812, lng: -75.1528, routes: ['4', 'C'], wheelchairAccessible: true },
-  { stopId: '17842', stopName: 'Frankford Transportation Center', lat: 40.0236, lng: -75.0816, routes: ['3', '5', '14', '20', '25', '66', '67'], wheelchairAccessible: true },
-  { stopId: '31119', stopName: '40th St & Market St', lat: 39.9611, lng: -75.2005, routes: ['21', '30', '31', '42', 'LUCY'], wheelchairAccessible: true },
-  { stopId: '22180', stopName: 'Fern Rock Transportation Center', lat: 40.0460, lng: -75.1139, routes: ['16', 'C', 'R'], wheelchairAccessible: true },
-  { stopId: '2870', stopName: 'Olney Transportation Center', lat: 40.0339, lng: -75.1206, routes: ['6', '16', '18', '22', '26', '55', 'C', 'R'], wheelchairAccessible: true },
-];
-
-export function searchStopsAndRoutes(query: string): (Stop | Route)[] {
-  const normalizedQuery = query.toLowerCase().trim();
-  if (!normalizedQuery) return [];
-
-  const results: (Stop | Route)[] = [];
-
-  // Search stops
-  for (const stop of SAMPLE_STOPS) {
-    if (
-      stop.stopId.includes(normalizedQuery) ||
-      stop.stopName.toLowerCase().includes(normalizedQuery)
-    ) {
-      results.push(stop);
-    }
   }
 
-  // Search routes
-  for (const route of SEPTA_ROUTES) {
-    if (
-      route.routeId.toLowerCase().includes(normalizedQuery) ||
-      route.routeShortName.toLowerCase().includes(normalizedQuery) ||
-      route.routeLongName.toLowerCase().includes(normalizedQuery)
-    ) {
-      results.push(route);
+  // Handle array response (it's an array of cards)
+  let card = apiData;
+  if (Array.isArray(apiData)) {
+    if (apiData.length === 0) {
+        return { 
+            balance: 0, 
+            cardNumber: null, 
+            pass: null, 
+            lastUpdated: new Date().toISOString(), 
+            raw: apiData 
+        };
     }
+    // Find the active card, or just take the first one
+    card = apiData.find((c: any) => c.status === 'Active') || apiData[0];
+  } else if (apiData.keycards && Array.isArray(apiData.keycards)) {
+    card = apiData.keycards[0];
+  }
+  
+  // Safety check: Ensure we have a card object
+  if (!card) {
+      return { 
+          balance: 0, 
+          cardNumber: null, 
+          pass: null, 
+          lastUpdated: new Date().toISOString(), 
+          raw: apiData 
+      };
   }
 
-  return results.slice(0, 10);
+  // Map fields based on the structure provided by user
+  // Structure: { balances: { travel_wallet_balance: 2.75 }, card_number: "...", products: [...] }
+  
+  const balance = card.balances?.travel_wallet_balance ?? 
+                  card.travel_wallet_balance ?? 
+                  card.balance ?? 
+                  0;
+                  
+  const cardNumber = card.card_number ?? 
+                     card.last_four ?? 
+                     card.keycard_id ?? 
+                     card.masked_card_number ?? 
+                     null;
+
+  // Extract pass name from products
+  const pass = mapPass(card.products);
+
+  return {
+    balance,
+    cardNumber: cardNumber ? cardNumber.replace(/\*/g, '') : null, // Clean up masking if needed
+    pass,
+    lastUpdated: new Date().toISOString(),
+    raw: apiData // Keep raw data for debugging if needed but UI won't use it
+  };
 }
 
-export function getStopById(stopId: string): Stop | undefined {
-  return SAMPLE_STOPS.find((s) => s.stopId === stopId);
-}
+function mapPass(products: any[]) {
+  if (!products || !Array.isArray(products) || products.length === 0) return null;
+  
+  // Find a product that isn't just the wallet itself (unless that's all there is)
+  const passProduct = products.find(p => 
+    p.product_name && 
+    !p.product_name.includes('Travel Wallet') && 
+    (p.status === 'Active' || p.status === 'UPCOMING')
+  );
 
-export function getRouteById(routeId: string): Route | undefined {
-  return SEPTA_ROUTES.find((r) => r.routeId === routeId);
+  if (passProduct) return passProduct.product_name;
+  return null; 
 }
-
-export function getRoutesByType(type: TransitMode): Route[] {
-  return SEPTA_ROUTES.filter((r) => r.routeType === type);
-}
-
-export function getNearbyStops(lat: number, lng: number, radiusMeters = 500): NearbyStop[] {
-  return SAMPLE_STOPS.map((stop) => {
-    const distance = calculateDistance(lat, lng, stop.lat, stop.lng);
-    return {
-      ...stop,
-      distanceMeters: distance,
-      distanceText: formatDistance(distance),
-    };
-  })
-    .filter((stop) => stop.distanceMeters <= radiusMeters)
-    .sort((a, b) => a.distanceMeters - b.distanceMeters);
-}
-
-// Haversine formula for distance calculation
-function calculateDistance(lat1: number, lng1: number, lat2: number, lng2: number): number {
-  const R = 6371000; // Earth's radius in meters
-  const dLat = ((lat2 - lat1) * Math.PI) / 180;
-  const dLng = ((lng2 - lng1) * Math.PI) / 180;
-  const a =
-    Math.sin(dLat / 2) * Math.sin(dLat / 2) +
-    Math.cos((lat1 * Math.PI) / 180) *
-      Math.cos((lat2 * Math.PI) / 180) *
-      Math.sin(dLng / 2) *
-      Math.sin(dLng / 2);
-  const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
-  return R * c;
-}
-
-function formatDistance(meters: number): string {
-  if (meters < 100) return `${Math.round(meters)} m`;
-  if (meters < 1000) return `${Math.round(meters / 10) * 10} m`;
-  return `${(meters / 1000).toFixed(1)} km`;
-}
-

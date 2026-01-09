@@ -2,13 +2,13 @@
 
 import Link from 'next/link';
 import { usePathname, useRouter } from 'next/navigation';
-import { Home, Navigation, Route, Bell, Heart, ChevronLeft } from 'lucide-react';
+import { Home, Navigation, Route, Wallet, Heart, ChevronLeft } from 'lucide-react';
 
 const navItems = [
   { href: '/', label: 'Home', icon: Home },
   { href: '/trip', label: 'Trip', icon: Navigation },
   { href: '/routes', label: 'Routes', icon: Route },
-  { href: '/alerts', label: 'Alerts', icon: Bell },
+  { href: '/wallet', label: 'Wallet', icon: Wallet },
   { href: '/favorites', label: 'Saved', icon: Heart },
 ];
 
