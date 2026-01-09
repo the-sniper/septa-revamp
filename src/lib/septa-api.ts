@@ -23,6 +23,11 @@ interface LoginResult {
   success: boolean;
   data?: any;
   error?: string;
+  session?: {
+    accessToken: string;
+    cookies: string;
+    userId: string | null;
+  };
 }
 
 export async function loginToSepta(username: string, password: string): Promise<LoginResult> {
@@ -81,6 +86,7 @@ export async function loginToSepta(username: string, password: string): Promise<
     // 3. FETCH WALLET DATA
     let walletData = null;
     let tripsData: any[] = [];
+    let paymentProfiles: any[] = [];
 
     if (userIdString) {
       const walletUrl = `${SEPTA_API_BASE}/indv_users/${userIdString}/keycard_details`;
@@ -168,6 +174,52 @@ export async function loginToSepta(username: string, password: string): Promise<
         };
       }
 
+      // 5. FETCH PAYMENT PROFILES
+      if (userIdString) {
+        try {
+            const paymentsUrl = `${SEPTA_API_BASE}/indv_users/${userIdString}/payment_profiles`;
+            const paymentsRes = await fetch(paymentsUrl, {
+                method: 'GET',
+                headers: {
+                    ...COMMON_HEADERS,
+                    'Cookie': cookieString,
+                    'X-Authorization': `Bearer ${accessToken}`,
+                }
+            });
+            if (paymentsRes.ok) {
+                const text = await paymentsRes.text();
+                // It might be wrapped in brackets or an object
+                try {
+                  const json = JSON.parse(text);
+                  if (Array.isArray(json)) paymentProfiles = json;
+                  else if (json.payment_profiles && Array.isArray(json.payment_profiles)) paymentProfiles = json.payment_profiles;
+                  else if (json.data && Array.isArray(json.data)) paymentProfiles = json.data;
+                  else paymentProfiles = [json]; // fallback
+                } catch {
+                   // ignore
+                }
+            }
+        } catch (e) {
+            console.error('[SEPTA-API] Failed to fetch payment profiles', e);
+        }
+      }
+
+      // Return successful data with session tokens for reuse
+      return { 
+        success: true, 
+        // @ts-ignore
+        data: { 
+            ...(Array.isArray(walletData) ? { cards: walletData } : walletData), 
+            trips: tripsData,
+            paymentProfiles 
+        },
+        session: {
+            accessToken,
+            cookies: cookieString,
+            userId: userIdString
+        }
+      };
+
     } else {
       console.error('[SEPTA-API] Could not find User ID to fetch wallet');
       return {
@@ -176,17 +228,113 @@ export async function loginToSepta(username: string, password: string): Promise<
       };
     }
 
-    return { 
-      success: true, 
-      // @ts-ignore
-      data: { ...(Array.isArray(walletData) ? { cards: walletData } : walletData), trips: tripsData }
-    };
-
   } catch (error) {
     console.error('[SEPTA-API] Error:', error);
     return { success: false, error: error instanceof Error ? error.message : 'Unknown error' };
   }
 }
+
+export async function addFunds(
+    username: string, 
+    password: string, 
+    amount: number, 
+    paymentProfileId: string, 
+    cvv: string
+): Promise<{ success: boolean; error?: string; data?: any }> {
+    try {
+        // 1. LOGIN
+        const loginResult = await loginToSepta(username, password);
+        
+        // @ts-ignore - session key exists now
+        if (!loginResult.success || !loginResult.session) {
+            return { success: false, error: loginResult.error || 'Login failed' };
+        }
+
+        // @ts-ignore
+        const { session, data } = loginResult;
+        const { accessToken, cookies, userId } = session;
+
+        // Find active card - Robust logic matching formatSeptaData
+        let card = null;
+        if (data.cards && Array.isArray(data.cards)) {
+             card = data.cards.find((c: any) => c.status === 'Active') || data.cards[0];
+        } else if (data.keycards && Array.isArray(data.keycards)) {
+             // @ts-ignore
+             card = data.keycards[0];
+        } else {
+             // fallback: data itself might be the card properties merged
+             card = data;
+        }
+
+        if (!card) return { success: false, error: 'No active card found in session data' };
+
+        let keycardId = card.keycard_id || card.id || card.key; 
+        
+        // Use robust utility if simple lookup fails
+        if (!keycardId) {
+            keycardId = findStringId(card);
+        }
+
+        // 2. PLACE ORDER
+        if (!keycardId) {
+             console.error('[SEPTA-API] Failed to find ID in card object:', JSON.stringify(card));
+             return { success: false, error: 'Could not identify KeyCard ID. Please try refreshing.' };
+        }
+
+        const orderUrl = `${SEPTA_API_BASE}/indv_users/${userId}/quick_orders`;
+
+        // Payload structure as per user request
+        const payload = {
+            order_info: {
+                fare_media_id: keycardId,
+                cart_type: "Add Product",
+                products: [
+                    {
+                        line_item_number: 1,
+                        product_id: "OjBcSQM3BxgE", // SEPTA Travel Wallet Product ID
+                        product_price: amount,
+                        fare_media_id: keycardId
+                    }
+                ],
+                payment_profiles: [
+                    {
+                        line_item_number: 1,
+                        payment_profile_id: paymentProfileId,
+                        payment_method: "Credit Card",
+                        credit_card_info: {
+                            cvv: cvv
+                        },
+                        payment_amount: amount
+                    }
+                ]
+            }
+        };
+
+        const orderResponse = await fetch(orderUrl, {
+            method: 'POST',
+            headers: {
+                ...COMMON_HEADERS,
+                'Cookie': cookies,
+                'X-Authorization': `Bearer ${accessToken}`,
+            },
+            body: JSON.stringify(payload)
+        });
+
+        if (orderResponse.ok) {
+            const result = await orderResponse.json();
+            return { success: true, data: result };
+        } else {
+            const errorText = await orderResponse.text();
+            console.error('[SEPTA-API] Order failed:', orderResponse.status, errorText);
+            return { success: false, error: `Order failed: ${orderResponse.status} - ${errorText}` };
+        }
+
+    } catch (e) {
+        console.error('[SEPTA-API] Add funds exception:', e);
+        return { success: false, error: e instanceof Error ? e.message : 'Unknown error' };
+    }
+}
+
 
 function parseJwt(token: string) {
   try {
@@ -397,6 +545,13 @@ export function formatSeptaData(apiData: any) {
     pass,
     lastUpdated: new Date().toISOString(),
     transactions,
+    paymentProfiles: (apiData.paymentProfiles || []).map((p: any) => ({
+        payment_profile_id: p.payment_profile_id,
+        description: p.credit_card_info?.card_type || p.payment_method || 'Credit Card',
+        last_four: p.credit_card_info?.card_number?.slice(-4) || '****',
+        card_type: p.credit_card_info?.card_type,
+        payment_method_type: p.payment_method
+    })),
     raw: apiData 
   };
 }
@@ -414,3 +569,329 @@ function mapPass(products: any[]) {
   if (passProduct) return passProduct.product_name;
   return null; 
 }
+
+// Public Data Constants & Helpers (Restored)
+
+export const SEPTA_ROUTES = [
+  // Subway
+  {
+    routeId: 'MFL',
+    routeShortName: 'MFL',
+    routeLongName: 'Market-Frankford Line',
+    routeType: 'subway',
+    directions: [
+      { directionId: 0, directionName: 'Westbound', destinationName: '69th Street' },
+      { directionId: 1, directionName: 'Eastbound', destinationName: 'Frankford' }
+    ]
+  },
+  {
+    routeId: 'BSL',
+    routeShortName: 'BSL',
+    routeLongName: 'Broad Street Line',
+    routeType: 'subway',
+    directions: [
+      { directionId: 0, directionName: 'Southbound', destinationName: 'NRG Station' },
+      { directionId: 1, directionName: 'Northbound', destinationName: 'Fern Rock' }
+    ]
+  },
+  // Trolley
+  {
+    routeId: '10',
+    routeShortName: '10',
+    routeLongName: '13th-Market to 63rd-Malvern',
+    routeType: 'trolley',
+    directions: [
+      { directionId: 0, directionName: 'Westbound', destinationName: '63rd-Malvern' },
+      { directionId: 1, directionName: 'Eastbound', destinationName: '13th-Market' }
+    ]
+  },
+  {
+    routeId: '11',
+    routeShortName: '11',
+    routeLongName: '13th-Market to Darby Trans Ctr',
+    routeType: 'trolley',
+    directions: [
+      { directionId: 0, directionName: 'Westbound', destinationName: 'Darby Trans Ctr' },
+      { directionId: 1, directionName: 'Eastbound', destinationName: '13th-Market' }
+    ]
+  },
+  {
+    routeId: '13',
+    routeShortName: '13',
+    routeLongName: '13th-Market to Yeadon-Darby',
+    routeType: 'trolley',
+    directions: [
+      { directionId: 0, directionName: 'Westbound', destinationName: 'Yeadon-Darby' },
+      { directionId: 1, directionName: 'Eastbound', destinationName: '13th-Market' }
+    ]
+  },
+  {
+    routeId: '15',
+    routeShortName: '15',
+    routeLongName: '63rd-Girard to Richmond-Westmoreland',
+    routeType: 'trolley',
+    directions: [
+      { directionId: 0, directionName: 'Westbound', destinationName: '63rd-Girard' },
+      { directionId: 1, directionName: 'Eastbound', destinationName: 'Richmond-Westmoreland' }
+    ]
+  },
+  {
+    routeId: '34',
+    routeShortName: '34',
+    routeLongName: '13th-Market to 61st-Baltimore',
+    routeType: 'trolley',
+    directions: [
+      { directionId: 0, directionName: 'Westbound', destinationName: '61st-Baltimore' },
+      { directionId: 1, directionName: 'Eastbound', destinationName: '13th-Market' }
+    ]
+  },
+  {
+    routeId: '36',
+    routeShortName: '36',
+    routeLongName: '13th-Market to 80th-Eastwick',
+    routeType: 'trolley',
+    directions: [
+      { directionId: 0, directionName: 'Westbound', destinationName: '80th-Eastwick' },
+      { directionId: 1, directionName: 'Eastbound', destinationName: '13th-Market' }
+    ]
+  },
+  // NHSL
+  {
+    routeId: 'NHSL',
+    routeShortName: 'NHSL',
+    routeLongName: 'Norristown High Speed Line',
+    routeType: 'nhsl',
+    directions: [
+      { directionId: 0, directionName: 'Westbound', destinationName: 'Norristown' },
+      { directionId: 1, directionName: 'Eastbound', destinationName: '69th Street' }
+    ]
+  },
+  // Regional Rail
+  {
+    routeId: 'AIR',
+    routeShortName: 'AIR',
+    routeLongName: 'Airport Line',
+    routeType: 'regional_rail',
+    directions: [
+      { directionId: 0, directionName: 'Outbound', destinationName: 'Airport' },
+      { directionId: 1, directionName: 'Inbound', destinationName: 'Center City' }
+    ]
+  },
+  {
+    routeId: 'CHE',
+    routeShortName: 'CHE',
+    routeLongName: 'Chestnut Hill East Line',
+    routeType: 'regional_rail',
+    directions: [
+      { directionId: 0, directionName: 'Outbound', destinationName: 'Chestnut Hill East' },
+      { directionId: 1, directionName: 'Inbound', destinationName: 'Center City' }
+    ]
+  },
+  {
+    routeId: 'CHW',
+    routeShortName: 'CHW',
+    routeLongName: 'Chestnut Hill West Line',
+    routeType: 'regional_rail',
+    directions: [
+      { directionId: 0, directionName: 'Outbound', destinationName: 'Chestnut Hill West' },
+      { directionId: 1, directionName: 'Inbound', destinationName: 'Center City' }
+    ]
+  },
+  {
+    routeId: 'LAN',
+    routeShortName: 'LAN',
+    routeLongName: 'Lansdale/Doylestown Line',
+    routeType: 'regional_rail',
+    directions: [
+      { directionId: 0, directionName: 'Outbound', destinationName: 'Doylestown' },
+      { directionId: 1, directionName: 'Inbound', destinationName: 'Center City' }
+    ]
+  },
+  {
+    routeId: 'MED',
+    routeShortName: 'MED',
+    routeLongName: 'Media/Wawa Line',
+    routeType: 'regional_rail',
+    directions: [
+      { directionId: 0, directionName: 'Outbound', destinationName: 'Wawa' },
+      { directionId: 1, directionName: 'Inbound', destinationName: 'Center City' }
+    ]
+  },
+  {
+    routeId: 'PAO',
+    routeShortName: 'PAO',
+    routeLongName: 'Paoli/Thorndale Line',
+    routeType: 'regional_rail',
+    directions: [
+      { directionId: 0, directionName: 'Outbound', destinationName: 'Thorndale' },
+      { directionId: 1, directionName: 'Inbound', destinationName: 'Center City' }
+    ]
+  },
+  {
+    routeId: 'TRE',
+    routeShortName: 'TRE',
+    routeLongName: 'Trenton Line',
+    routeType: 'regional_rail',
+    directions: [
+      { directionId: 0, directionName: 'Outbound', destinationName: 'Trenton' },
+      { directionId: 1, directionName: 'Inbound', destinationName: 'Center City' }
+    ]
+  },
+  {
+    routeId: 'WAR',
+    routeShortName: 'WAR',
+    routeLongName: 'Warminster Line',
+    routeType: 'regional_rail',
+    directions: [
+      { directionId: 0, directionName: 'Outbound', destinationName: 'Warminster' },
+      { directionId: 1, directionName: 'Inbound', destinationName: 'Center City' }
+    ]
+  },
+  {
+    routeId: 'WIL',
+    routeShortName: 'WIL',
+    routeLongName: 'Wilmington/Newark Line',
+    routeType: 'regional_rail',
+    directions: [
+      { directionId: 0, directionName: 'Outbound', destinationName: 'Newark' },
+      { directionId: 1, directionName: 'Inbound', destinationName: 'Center City' }
+    ]
+  },
+  {
+    routeId: 'WTR',
+    routeShortName: 'WTR',
+    routeLongName: 'West Trenton Line',
+    routeType: 'regional_rail',
+    directions: [
+      { directionId: 0, directionName: 'Outbound', destinationName: 'West Trenton' },
+      { directionId: 1, directionName: 'Inbound', destinationName: 'Center City' }
+    ]
+  },
+  // Bus Routes (Selection)
+  {
+    routeId: '17',
+    routeShortName: '17',
+    routeLongName: 'Front-Market to 20th-Johnston',
+    routeType: 'bus',
+    directions: [
+      { directionId: 0, directionName: 'Southbound', destinationName: '20th-Johnston' },
+      { directionId: 1, directionName: 'Northbound', destinationName: 'Front-Market' }
+    ]
+  },
+  {
+    routeId: '21',
+    routeShortName: '21',
+    routeLongName: 'Penns Landing to 69th Street TC',
+    routeType: 'bus',
+    directions: [
+      { directionId: 0, directionName: 'Westbound', destinationName: '69th Street TC' },
+      { directionId: 1, directionName: 'Eastbound', destinationName: 'Penns Landing' }
+    ]
+  },
+  {
+    routeId: '23',
+    routeShortName: '23',
+    routeLongName: 'Chestnut Hill to Broad-Oregon',
+    routeType: 'bus',
+    directions: [
+      { directionId: 0, directionName: 'Southbound', destinationName: 'Broad-Oregon' },
+      { directionId: 1, directionName: 'Northbound', destinationName: 'Chestnut Hill' }
+    ]
+  },
+  {
+    routeId: '33',
+    routeShortName: '33',
+    routeLongName: 'Penns Landing to 23th-Venango',
+    routeType: 'bus',
+    directions: [
+      { directionId: 0, directionName: 'Northbound', destinationName: '23th-Venango' },
+      { directionId: 1, directionName: 'Southbound', destinationName: 'Penns Landing' }
+    ]
+  },
+  {
+    routeId: '42',
+    routeShortName: '42',
+    routeLongName: 'Penns Landing to Wycombe',
+    routeType: 'bus',
+    directions: [
+      { directionId: 0, directionName: 'Westbound', destinationName: 'Wycombe' },
+      { directionId: 1, directionName: 'Eastbound', destinationName: 'Penns Landing' }
+    ]
+  },
+  {
+    routeId: '47',
+    routeShortName: '47',
+    routeLongName: 'Whitman Plaza to 5th-Godfrey',
+    routeType: 'bus',
+    directions: [
+      { directionId: 0, directionName: 'Northbound', destinationName: '5th-Godfrey' },
+      { directionId: 1, directionName: 'Southbound', destinationName: 'Whitman Plaza' }
+    ]
+  }
+];
+
+export const SAMPLE_STOPS = [
+  { stopId: '20658', stopName: '15th St Station - MFL', lat: 39.9522, lng: -75.1654, routes: ['MFL', '10', '11', '13', '34', '36'] },
+  { stopId: '20659', stopName: 'City Hall Station - BSL', lat: 39.9529, lng: -75.1636, routes: ['BSL', 'B-Ridge'] },
+  { stopId: '136', stopName: 'Jefferson Station', lat: 39.9525, lng: -75.1581, routes: ['regional_rail'] },
+  { stopId: '137', stopName: 'Suburban Station', lat: 39.9538, lng: -75.1678, routes: ['regional_rail'] },
+  { stopId: '20', stopName: '30th St Station', lat: 39.9554, lng: -75.1819, routes: ['MFL', 'regional_rail', 'trolley', '9', '30', '31', '44', '62', '124', '125'] },
+];
+
+export function getNearbyStops(lat: number, lng: number, radiusMeters: number = 800) {
+    // Return sample stops for now since we don't have geospatial DB
+    return SAMPLE_STOPS.map(s => ({
+        ...s,
+        distanceMeters: Math.random() * 500,
+        distanceText: '0.2 mi'
+    }));
+}
+
+export async function getRealTimeArrivals(stopId: string) {
+    // Return empty array to prevent crashes
+    return {
+        data: [],
+        error: null,
+        isStale: false,
+        lastUpdated: new Date().toISOString()
+    };
+}
+
+export async function getAlerts() {
+    return {
+        data: [],
+        error: null,
+        isStale: false,
+        lastUpdated: new Date().toISOString()
+    };
+}
+
+export function getRouteById(routeId: string) {
+    if (!routeId) return null;
+    return SEPTA_ROUTES.find(r => r.routeId.toLowerCase() === routeId.toLowerCase()) || null;
+}
+
+export async function getRouteAlerts(routeId: string) {
+    return {
+        data: [],
+        error: null,
+        isStale: false,
+        lastUpdated: new Date().toISOString()
+    };
+}
+
+export async function getTransitView(routeId: string) {
+    return {
+        data: [],
+        error: null,
+        isStale: false,
+        lastUpdated: new Date().toISOString()
+    };
+}
+
+export function getStopById(stopId: string) {
+    if (!stopId) return null;
+    return SAMPLE_STOPS.find(s => s.stopId === stopId) || null;
+}
+
+

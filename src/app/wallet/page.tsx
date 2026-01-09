@@ -46,7 +46,17 @@ interface WalletData {
   pass: string | null;
   lastUpdated: string;
   transactions: Transaction[];
+  paymentProfiles: PaymentProfile[];
   raw?: any;
+}
+
+interface PaymentProfile {
+  payment_profile_id: string;
+  description?: string;
+  last_four?: string;
+  card_type?: string;
+  payment_method_type?: string;
+  // Add other fields as discovered, but these are essential
 }
 
 interface Transaction {
@@ -71,6 +81,13 @@ export default function WalletPage() {
   const [rememberMe, setRememberMe] = useState(true);
   const [showDebug, setShowDebug] = useState(false);
   const [showHistoryDrawer, setShowHistoryDrawer] = useState(false);
+
+  // Add Funds State
+  const [showAddFundsDrawer, setShowAddFundsDrawer] = useState(false);
+  const [addAmount, setAddAmount] = useState<string>("10.00");
+  const [selectedProfileId, setSelectedProfileId] = useState<string>("");
+  const [cvv, setCvv] = useState("");
+  const [isAddingFunds, setIsAddingFunds] = useState(false);
 
   // Loading states
   const [isLoading, setIsLoading] = useState(false);
@@ -169,12 +186,20 @@ export default function WalletPage() {
             pass: result.data.pass ?? walletData?.pass ?? null,
             lastUpdated: result.data.lastUpdated,
             transactions: result.data.transactions || [],
+            paymentProfiles: result.data.paymentProfiles || [],
             raw: result.data.raw,
           };
 
           saveWalletData(newWalletData);
           setSuccessMessage("Balance & Trips updated!");
           setTimeout(() => setSuccessMessage(null), 3000);
+
+          // Pre-select first payment profile
+          if (newWalletData.paymentProfiles.length > 0) {
+            setSelectedProfileId(
+              newWalletData.paymentProfiles[0].payment_profile_id
+            );
+          }
         } else {
           setError(result.error || "Failed to fetch balance");
         }
@@ -186,6 +211,44 @@ export default function WalletPage() {
     },
     [credentials, username, password, rememberMe, walletData, saveWalletData]
   );
+
+  const handleAddFunds = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!credentials) return;
+
+    setIsAddingFunds(true);
+    setError(null);
+
+    try {
+      const response = await fetch("/api/septa-proxy", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          username: credentials.username,
+          password: credentials.password,
+          action: "add_funds",
+          amount: parseFloat(addAmount),
+          paymentProfileId: selectedProfileId,
+          cvv: cvv,
+        }),
+      });
+
+      const result = await response.json();
+      if (result.success) {
+        setSuccessMessage("Funds added successfully!");
+        setShowAddFundsDrawer(false);
+        setCvv("");
+        // Refresh balance after delay
+        setTimeout(() => fetchBalance(true), 2000);
+      } else {
+        setError(result.error || "Failed to add funds");
+      }
+    } catch (err) {
+      setError("Failed to process request");
+    } finally {
+      setIsAddingFunds(false);
+    }
+  };
 
   // Handle login form submission
   const handleLogin = async (e: React.FormEvent) => {
@@ -240,7 +303,7 @@ export default function WalletPage() {
           // Connected - show balance
           <>
             {/* Balance Card */}
-            <div className="relative overflow-hidden rounded-3xl bg-gradient-to-br from-septa-gold via-amber-500 to-orange-500 p-6">
+            <div className="relative overflow-hidden rounded-3xl bg-gradient-to-br from-septa-gold via-amber-500 to-orange-500 p-6 shadow-xl">
               <div
                 className="absolute inset-0 opacity-20"
                 onClick={() => setShowDebug(!showDebug)} // Secret toggle
@@ -267,16 +330,16 @@ export default function WalletPage() {
                 {/* Header */}
                 <div className="flex items-center justify-between mb-4">
                   <div className="flex items-center gap-3">
-                    <div className="w-12 h-12 rounded-xl bg-white/20 flex items-center justify-center">
+                    <div className="w-12 h-12 rounded-xl bg-white/20 flex items-center justify-center backdrop-blur-sm">
                       <CreditCard className="w-6 h-6 text-white" />
                     </div>
                     <div>
-                      <p className="text-white/70 text-xs font-medium">
+                      <p className="text-white/70 text-xs font-medium uppercase tracking-wider">
                         SEPTA KEY
                       </p>
-                      <p className="text-white font-bold">
+                      <p className="text-white font-bold tracking-wide">
                         {walletData.cardNumber
-                          ? `****${walletData.cardNumber}`
+                          ? `•••• ${walletData.cardNumber.slice(-4)}`
                           : "Travel Wallet"}
                       </p>
                     </div>
@@ -284,7 +347,7 @@ export default function WalletPage() {
                   <button
                     onClick={() => fetchBalance(true)}
                     disabled={isLoading}
-                    className="p-2 rounded-lg bg-white/20 hover:bg-white/30 transition-colors disabled:opacity-60"
+                    className="p-2 rounded-lg bg-white/20 hover:bg-white/30 transition-colors disabled:opacity-60 backdrop-blur-sm"
                     title="Refresh Balance"
                   >
                     {isLoading ? (
@@ -297,34 +360,42 @@ export default function WalletPage() {
 
                 {/* Balance */}
                 <div className="mb-2">
-                  <p className="text-white/70 text-sm mb-1">Current Balance</p>
-                  <p className="text-5xl font-bold text-white font-mono tracking-tight">
-                    ${walletData.balance.toFixed(2)}
+                  <p className="text-white/80 text-sm mb-1 font-medium">
+                    Current Balance
+                  </p>
+                  <p className="text-5xl font-bold text-white font-mono tracking-tight drop-shadow-sm">
+                    $
+                    {typeof walletData.balance === "number"
+                      ? walletData.balance.toFixed(2)
+                      : "0.00"}
                   </p>
                 </div>
 
                 {walletData.pass && (
-                  <p className="text-white/80 text-sm mb-2">
-                    Pass: {walletData.pass}
-                  </p>
+                  <div className="inline-flex items-center px-2.5 py-1 rounded-full bg-white/20 backdrop-blur-md border border-white/10 mb-2">
+                    <p className="text-white text-xs font-medium">
+                      {walletData.pass}
+                    </p>
+                  </div>
                 )}
 
-                <p className="text-white/60 text-xs mb-6">
-                  Last synced:{" "}
-                  {new Date(walletData.lastUpdated).toLocaleString()}
+                <p className="text-white/60 text-xs mb-6 font-medium">
+                  Updated:{" "}
+                  {new Date(walletData.lastUpdated).toLocaleTimeString([], {
+                    hour: "2-digit",
+                    minute: "2-digit",
+                  })}
                 </p>
 
                 {/* Quick Actions */}
                 <div className="grid grid-cols-1 gap-3">
-                  <a
-                    href={SEPTA_URLS.addFunds}
-                    target="_blank"
-                    rel="noopener noreferrer"
-                    className="flex items-center justify-center gap-2 py-3.5 bg-white text-amber-600 font-bold rounded-xl transition-all hover:bg-white/90 shadow-lg text-sm"
+                  <button
+                    onClick={() => setShowAddFundsDrawer(true)}
+                    className="flex items-center justify-center gap-2 py-3.5 bg-white text-amber-600 font-bold rounded-xl transition-all hover:bg-gray-50 hover:scale-[1.02] active:scale-95 shadow-lg text-sm"
                   >
                     <Plus className="w-4 h-4" />
                     Add Funds
-                  </a>
+                  </button>
                 </div>
               </div>
             </div>
@@ -342,37 +413,41 @@ export default function WalletPage() {
                 href={SEPTA_URLS.dashboard}
                 target="_blank"
                 rel="noopener noreferrer"
-                className="p-4 rounded-xl bg-bg-secondary border border-border-subtle text-center hover:border-septa-blue/30 transition-colors"
-                title="Click pattern on card to toggle debug"
+                className="p-4 rounded-xl bg-bg-secondary border border-border-subtle text-center hover:border-septa-blue/30 transition-colors group"
               >
-                <ExternalLink className="w-6 h-6 text-septa-blue mx-auto mb-2" />
+                <div className="w-10 h-10 rounded-full bg-septa-blue/10 flex items-center justify-center mx-auto mb-3 group-hover:bg-septa-blue/20 transition-colors">
+                  <ExternalLink className="w-5 h-5 text-septa-blue" />
+                </div>
                 <p className="font-semibold text-text-primary text-sm">
                   View Account
                 </p>
-                <p className="text-xs text-text-muted mt-1">On SEPTA</p>
+                <p className="text-xs text-text-muted mt-1">On SEPTA Site</p>
               </a>
               <button
                 onClick={() => fetchBalance(true)}
                 disabled={isLoading}
-                className="p-4 rounded-xl bg-bg-secondary border border-border-subtle text-center hover:border-live/30 transition-colors disabled:opacity-60"
+                className="p-4 rounded-xl bg-bg-secondary border border-border-subtle text-center hover:border-live/30 transition-colors disabled:opacity-60 group"
               >
-                {isLoading ? (
-                  <Loader2 className="w-6 h-6 text-live mx-auto mb-2 animate-spin" />
-                ) : (
-                  <RefreshCw className="w-6 h-6 text-live mx-auto mb-2" />
-                )}
+                <div className="w-10 h-10 rounded-full bg-live/10 flex items-center justify-center mx-auto mb-3 group-hover:bg-live/20 transition-colors">
+                  <RefreshCw
+                    className={`w-5 h-5 text-live ${
+                      isLoading ? "animate-spin" : ""
+                    }`}
+                  />
+                </div>
+
                 <p className="font-semibold text-text-primary text-sm">
                   Sync Balance
                 </p>
-                <p className="text-xs text-text-muted mt-1">From SEPTA</p>
+                <p className="text-xs text-text-muted mt-1">Latest Data</p>
               </button>
             </div>
 
             {/* Transaction History */}
             <section>
-              <div className="flex items-center justify-between mb-3">
+              <div className="flex items-center justify-between mb-3 px-1">
                 <h2 className="text-lg font-semibold text-text-primary flex items-center gap-2">
-                  <History className="w-5 h-5" />
+                  <History className="w-5 h-5 text-text-secondary" />
                   Recent Activity
                 </h2>
               </div>
@@ -382,8 +457,10 @@ export default function WalletPage() {
                   {walletData.transactions.slice(0, 5).map((tx) => {
                     let dateStr = "Unknown Date";
                     try {
-                      dateStr = new Date(tx.timestamp).toLocaleDateString();
-                      if (dateStr === "Invalid Date") throw new Error();
+                      dateStr = new Date(tx.timestamp).toLocaleDateString(
+                        undefined,
+                        { month: "short", day: "numeric" }
+                      );
                     } catch {
                       dateStr = "Recent";
                     }
@@ -391,27 +468,29 @@ export default function WalletPage() {
                     return (
                       <div
                         key={tx.id}
-                        className="p-3 rounded-xl bg-bg-secondary border border-border-subtle flex items-center justify-between"
+                        className="p-3.5 rounded-xl bg-bg-secondary border border-border-subtle flex items-center justify-between hover:bg-bg-tertiary transition-colors"
                       >
-                        <div className="flex items-center gap-3">
+                        <div className="flex items-center gap-3.5">
                           <div
-                            className={`w-8 h-8 rounded-lg flex items-center justify-center ${
+                            className={`w-10 h-10 rounded-full flex items-center justify-center border ${
                               tx.type === "credit"
-                                ? "bg-live/10"
-                                : "bg-bg-tertiary"
+                                ? "bg-live/10 border-live/20"
+                                : "bg-bg-tertiary border-border-subtle"
                             }`}
                           >
                             {tx.type === "credit" ? (
-                              <Plus className="w-4 h-4 text-live" />
+                              <Plus className="w-5 h-5 text-live" />
                             ) : (
-                              <Minus className="w-4 h-4 text-text-secondary" />
+                              <Minus className="w-5 h-5 text-text-secondary" />
                             )}
                           </div>
                           <div>
                             <p className="font-medium text-text-primary text-sm line-clamp-1">
                               {tx.description}
                             </p>
-                            <p className="text-xs text-text-muted">{dateStr}</p>
+                            <p className="text-xs text-text-muted mt-0.5">
+                              {dateStr}
+                            </p>
                           </div>
                         </div>
                         <p
@@ -429,23 +508,161 @@ export default function WalletPage() {
                   })}
                 </div>
               ) : (
-                <div className="p-6 rounded-xl bg-bg-secondary border border-border-subtle text-center">
-                  <p className="text-text-muted text-sm">
+                <div className="p-8 rounded-xl bg-bg-secondary border border-border-subtle text-center">
+                  <div className="w-12 h-12 rounded-full bg-bg-tertiary flex items-center justify-center mx-auto mb-3">
+                    <History className="w-6 h-6 text-text-muted" />
+                  </div>
+                  <p className="text-text-muted text-sm font-medium">
                     No recent activity found.
                   </p>
                 </div>
               )}
 
               {/* View More Button */}
-              <div className="pt-2">
+              <div className="pt-3">
                 <button
                   onClick={() => setShowHistoryDrawer(true)}
-                  className="w-full p-3 rounded-xl bg-bg-tertiary border border-border-default flex items-center justify-center gap-2 text-text-secondary hover:text-text-primary hover:border-border-strong transition-colors text-sm"
+                  className="w-full p-3.5 rounded-xl bg-bg-tertiary border border-border-default flex items-center justify-center gap-2 text-text-secondary hover:text-text-primary hover:border-border-strong transition-colors text-sm font-medium"
                 >
                   View Full History
                 </button>
               </div>
             </section>
+
+            {/* Add Funds Drawer */}
+            <Drawer
+              isOpen={showAddFundsDrawer}
+              onClose={() => setShowAddFundsDrawer(false)}
+              title="Add Funds"
+            >
+              <div className="p-1 space-y-6">
+                <form onSubmit={handleAddFunds} className="space-y-6">
+                  {/* Amount Selection */}
+                  <div className="space-y-3">
+                    <label className="text-sm font-medium text-text-secondary block">
+                      Amount
+                    </label>
+                    <div className="grid grid-cols-3 gap-3">
+                      {["10.00", "20.00", "50.00"].map((amt) => (
+                        <button
+                          key={amt}
+                          type="button"
+                          onClick={() => setAddAmount(amt)}
+                          className={`py-2 px-3 rounded-lg border text-sm font-medium transition-all ${
+                            addAmount === amt
+                              ? "bg-septa-blue text-white border-septa-blue"
+                              : "bg-bg-tertiary border-border-default text-text-primary hover:border-gray-400"
+                          }`}
+                        >
+                          ${amt}
+                        </button>
+                      ))}
+                    </div>
+                    <div className="relative">
+                      <span className="absolute left-3 top-1/2 -translate-y-1/2 text-text-muted font-mono">
+                        $
+                      </span>
+                      <input
+                        type="number"
+                        step="0.01"
+                        value={addAmount}
+                        onChange={(e) => setAddAmount(e.target.value)}
+                        className="w-full pl-8 pr-4 py-3 bg-bg-tertiary border border-border-default rounded-xl font-mono text-lg focus:ring-2 focus:ring-septa-blue/20 outline-none"
+                      />
+                    </div>
+                  </div>
+
+                  {/* Payment Method */}
+                  <div className="space-y-3">
+                    <label className="text-sm font-medium text-text-secondary block">
+                      Payment Method
+                    </label>
+                    {(walletData.paymentProfiles || []).length > 0 ? (
+                      <div className="space-y-2">
+                        {(walletData.paymentProfiles || []).map((p) => (
+                          <label
+                            key={p.payment_profile_id}
+                            className={`flex items-center gap-4 p-3 rounded-xl border cursor-pointer transition-all ${
+                              selectedProfileId === p.payment_profile_id
+                                ? "border-septa-blue bg-septa-blue/5"
+                                : "border-border-default bg-bg-tertiary hover:border-gray-400"
+                            }`}
+                          >
+                            <input
+                              type="radio"
+                              name="paymentProfile"
+                              value={p.payment_profile_id}
+                              checked={
+                                selectedProfileId === p.payment_profile_id
+                              }
+                              onChange={() =>
+                                setSelectedProfileId(p.payment_profile_id)
+                              }
+                              className="w-4 h-4 text-septa-blue"
+                            />
+                            <div className="flex-1">
+                              <p className="font-semibold text-text-primary text-sm">
+                                {p.description || p.card_type || "Credit Card"}
+                              </p>
+                              <p className="text-xs text-text-muted">
+                                •••• {p.last_four || "****"}
+                              </p>
+                            </div>
+                            <CreditCard className="w-5 h-5 text-text-muted" />
+                          </label>
+                        ))}
+                      </div>
+                    ) : (
+                      <div className="p-4 rounded-xl bg-orange-500/10 border border-orange-500/20 text-orange-600 text-sm">
+                        No saved payment methods found. Please add a card on
+                        septakey.org first.
+                      </div>
+                    )}
+                  </div>
+
+                  {/* CVV Input */}
+                  {(walletData.paymentProfiles || []).length > 0 && (
+                    <div className="space-y-3">
+                      <label className="text-sm font-medium text-text-secondary block">
+                        Card Security Code (CVV)
+                      </label>
+                      <div className="relative">
+                        <Lock className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-text-muted" />
+                        <input
+                          type="password"
+                          maxLength={4}
+                          value={cvv}
+                          onChange={(e) => setCvv(e.target.value)}
+                          placeholder="123"
+                          className="w-full pl-10 pr-4 py-3 bg-bg-tertiary border border-border-default rounded-xl font-mono text-lg focus:ring-2 focus:ring-septa-blue/20 outline-none"
+                          required
+                        />
+                      </div>
+                    </div>
+                  )}
+
+                  <button
+                    type="submit"
+                    disabled={
+                      isAddingFunds || !selectedProfileId || !addAmount || !cvv
+                    }
+                    className="w-full py-4 bg-septa-blue hover:bg-septa-blue-bright text-white font-bold rounded-xl transition-all disabled:opacity-60 disabled:cursor-not-allowed flex items-center justify-center gap-2 shadow-lg shadow-septa-blue/20"
+                  >
+                    {isAddingFunds ? (
+                      <>
+                        <Loader2 className="w-5 h-5 animate-spin" />
+                        Adding Funds...
+                      </>
+                    ) : (
+                      <>
+                        Confirm Payment
+                        <ArrowRight className="w-5 h-5" />
+                      </>
+                    )}
+                  </button>
+                </form>
+              </div>
+            </Drawer>
 
             {/* History Drawer */}
             <Drawer
@@ -532,18 +749,18 @@ export default function WalletPage() {
           // Not connected - show login
           <>
             {/* Hero */}
-            <div className="relative overflow-hidden rounded-3xl bg-gradient-to-br from-septa-blue via-[#2563eb] to-[#1e40af] p-6">
+            <div className="relative overflow-hidden rounded-3xl bg-gradient-to-br from-septa-blue via-[#2563eb] to-[#1e40af] p-6 shadow-xl">
               <div className="absolute top-0 right-0 w-40 h-40 bg-septa-gold/20 rounded-full blur-3xl" />
               <div className="absolute bottom-0 left-0 w-32 h-32 bg-white/10 rounded-full blur-2xl" />
 
-              <div className="relative text-center py-4">
-                <div className="w-20 h-20 rounded-2xl bg-white/20 backdrop-blur-sm flex items-center justify-center mx-auto mb-4 shadow-lg">
+              <div className="relative text-center py-6">
+                <div className="w-20 h-20 rounded-2xl bg-white/20 backdrop-blur-sm flex items-center justify-center mx-auto mb-5 shadow-lg border border-white/10">
                   <Wallet className="w-10 h-10 text-white" />
                 </div>
-                <h1 className="text-2xl font-bold text-white mb-2">
+                <h1 className="text-2xl font-bold text-white mb-3">
                   Connect SEPTA Key
                 </h1>
-                <p className="text-white/80 text-sm leading-relaxed">
+                <p className="text-white/80 text-sm leading-relaxed max-w-xs mx-auto">
                   Sign in with your SEPTA Key account to view your balance and
                   manage your wallet.
                 </p>
@@ -551,43 +768,43 @@ export default function WalletPage() {
             </div>
 
             {/* Login Form */}
-            <form onSubmit={handleLogin} className="space-y-4">
-              <div className="p-5 rounded-2xl bg-bg-secondary border border-border-subtle space-y-4">
+            <form onSubmit={handleLogin} className="space-y-5">
+              <div className="p-5 rounded-2xl bg-bg-secondary border border-border-subtle space-y-5 shadow-sm">
                 <div>
-                  <label className="block text-sm font-medium text-text-secondary mb-2">
+                  <label className="block text-sm font-medium text-text-secondary mb-2 ml-1">
                     Username
                   </label>
-                  <div className="relative">
-                    <User className="absolute left-4 top-1/2 -translate-y-1/2 w-5 h-5 text-text-muted" />
+                  <div className="relative group">
+                    <User className="absolute left-4 top-1/2 -translate-y-1/2 w-5 h-5 text-text-muted group-focus-within:text-septa-blue transition-colors" />
                     <input
                       type="text"
                       value={username}
                       onChange={(e) => setUsername(e.target.value)}
                       placeholder="Your SEPTA Key username"
-                      className="w-full pl-12 pr-4 py-3 bg-bg-tertiary border border-border-default rounded-xl text-text-primary placeholder:text-text-muted focus:border-septa-blue focus:ring-2 focus:ring-septa-blue/20 outline-none transition-all"
+                      className="w-full pl-12 pr-4 py-3.5 bg-bg-tertiary border border-border-default rounded-xl text-text-primary placeholder:text-text-muted focus:border-septa-blue focus:ring-4 focus:ring-septa-blue/10 outline-none transition-all"
                       required
                     />
                   </div>
                 </div>
 
                 <div>
-                  <label className="block text-sm font-medium text-text-secondary mb-2">
+                  <label className="block text-sm font-medium text-text-secondary mb-2 ml-1">
                     Password
                   </label>
-                  <div className="relative">
-                    <Lock className="absolute left-4 top-1/2 -translate-y-1/2 w-5 h-5 text-text-muted" />
+                  <div className="relative group">
+                    <Lock className="absolute left-4 top-1/2 -translate-y-1/2 w-5 h-5 text-text-muted group-focus-within:text-septa-blue transition-colors" />
                     <input
                       type={showPassword ? "text" : "password"}
                       value={password}
                       onChange={(e) => setPassword(e.target.value)}
                       placeholder="Your SEPTA Key password"
-                      className="w-full pl-12 pr-12 py-3 bg-bg-tertiary border border-border-default rounded-xl text-text-primary placeholder:text-text-muted focus:border-septa-blue focus:ring-2 focus:ring-septa-blue/20 outline-none transition-all"
+                      className="w-full pl-12 pr-12 py-3.5 bg-bg-tertiary border border-border-default rounded-xl text-text-primary placeholder:text-text-muted focus:border-septa-blue focus:ring-4 focus:ring-septa-blue/10 outline-none transition-all"
                       required
                     />
                     <button
                       type="button"
                       onClick={() => setShowPassword(!showPassword)}
-                      className="absolute right-4 top-1/2 -translate-y-1/2 text-text-muted hover:text-text-secondary"
+                      className="absolute right-4 top-1/2 -translate-y-1/2 text-text-muted hover:text-text-secondary p-1 rounded-md hover:bg-bg-primary transition-colors"
                     >
                       {showPassword ? (
                         <EyeOff className="w-5 h-5" />
@@ -598,14 +815,17 @@ export default function WalletPage() {
                   </div>
                 </div>
 
-                <label className="flex items-center gap-3 cursor-pointer">
-                  <input
-                    type="checkbox"
-                    checked={rememberMe}
-                    onChange={(e) => setRememberMe(e.target.checked)}
-                    className="w-5 h-5 rounded border-border-default bg-bg-tertiary text-septa-blue focus:ring-septa-blue/20"
-                  />
-                  <span className="text-sm text-text-secondary">
+                <label className="flex items-center gap-3 cursor-pointer group">
+                  <div className="relative flex items-center">
+                    <input
+                      type="checkbox"
+                      checked={rememberMe}
+                      onChange={(e) => setRememberMe(e.target.checked)}
+                      className="peer h-5 w-5 cursor-pointer appearance-none rounded-md border border-border-default bg-bg-tertiary transition-all checked:border-septa-blue checked:bg-septa-blue"
+                    />
+                    <Check className="pointer-events-none absolute left-1/2 top-1/2 -translate-x-1/2 -translate-y-1/2 w-3.5 h-3.5 text-white opacity-0 peer-checked:opacity-100 transition-opacity" />
+                  </div>
+                  <span className="text-sm text-text-secondary group-hover:text-text-primary transition-colors">
                     Remember my credentials
                   </span>
                 </label>
@@ -614,7 +834,7 @@ export default function WalletPage() {
               <button
                 type="submit"
                 disabled={isLoading || !username || !password}
-                className="w-full py-4 bg-septa-blue hover:bg-septa-blue-bright text-white font-bold rounded-xl transition-all disabled:opacity-60 disabled:cursor-not-allowed flex items-center justify-center gap-2"
+                className="w-full py-4 bg-septa-blue hover:bg-septa-blue-bright text-white font-bold rounded-xl transition-all disabled:opacity-60 disabled:cursor-not-allowed flex items-center justify-center gap-2 shadow-lg shadow-septa-blue/20 hover:scale-[1.02] active:scale-[0.98]"
               >
                 {isLoading ? (
                   <>
@@ -631,14 +851,14 @@ export default function WalletPage() {
             </form>
 
             {/* Security note */}
-            <div className="p-4 rounded-xl bg-live/10 border border-live/20">
+            <div className="p-4 rounded-xl bg-bg-secondary border border-border-subtle">
               <div className="flex items-start gap-3">
-                <Shield className="w-5 h-5 text-live flex-shrink-0 mt-0.5" />
+                <Shield className="w-5 h-5 text-septa-green flex-shrink-0 mt-0.5" />
                 <div>
-                  <p className="font-semibold text-live text-sm">
+                  <p className="font-semibold text-text-primary text-sm">
                     Secure Connection
                   </p>
-                  <p className="text-xs text-text-secondary mt-1">
+                  <p className="text-xs text-text-muted mt-1 leading-relaxed">
                     Your credentials are stored locally on your device and used
                     to connect directly to SEPTA. We never store your password
                     on our servers.

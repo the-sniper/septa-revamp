@@ -5,7 +5,8 @@ export const maxDuration = 60; // Standard timeout
 
 export async function POST(request: NextRequest) {
   try {
-    const { username, password } = await request.json();
+    const body = await request.json();
+    const { username, password, action } = body;
 
     if (!username || !password) {
       return NextResponse.json(
@@ -14,7 +15,28 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    // Use the direct API client
+    // Handle Add Funds
+    if (action === 'add_funds') {
+        const { amount, paymentProfileId, cvv } = body;
+        // Import addFunds dynamically or ensure it's imported at top
+        const { addFunds } = await import('@/lib/septa-api');
+        
+        const result = await addFunds(username, password, amount, paymentProfileId, cvv);
+        
+        if (!result.success) {
+            return NextResponse.json(
+                { success: false, error: result.error || 'Add funds failed' },
+                { status: 400 }
+            );
+        }
+        
+        return NextResponse.json({
+            success: true,
+            data: result.data
+        });
+    }
+
+    // Default: Login & Fetch Data
     const result = await loginToSepta(username, password);
 
     if (!result.success) {
