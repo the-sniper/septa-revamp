@@ -23,6 +23,8 @@ import {
 } from "lucide-react";
 import { Header } from "@/components/Navigation";
 import { Drawer } from "@/components/ui/Drawer";
+import { BiometricSetup } from "@/components/BiometricSetup";
+import { BiometricLogin } from "@/components/BiometricLogin";
 
 // Storage keys
 const CREDENTIALS_KEY = "septa-credentials";
@@ -93,6 +95,14 @@ export default function WalletPage() {
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [successMessage, setSuccessMessage] = useState<string | null>(null);
+  const [showBiometricSetup, setShowBiometricSetup] = useState(false);
+  const [hasBiometrics, setHasBiometrics] = useState(false);
+
+  useEffect(() => {
+    // Check if biometrics are enabled on this device
+    const bioStats = localStorage.getItem("septa_biometrics_enabled");
+    setHasBiometrics(bioStats === "true");
+  }, []);
 
   // Load data from localStorage on mount
   useEffect(() => {
@@ -149,9 +159,12 @@ export default function WalletPage() {
 
   // Fetch balance from SEPTA
   const fetchBalance = useCallback(
-    async (showLoading = true) => {
-      const user = credentials?.username || username;
-      const pass = credentials?.password || password;
+    async (
+      showLoading = true,
+      explicitCreds?: { username: string; password: string }
+    ) => {
+      const user = explicitCreds?.username || credentials?.username || username;
+      const pass = explicitCreds?.password || credentials?.password || password;
 
       if (!user || !pass) {
         setError("Please enter your SEPTA Key credentials");
@@ -171,8 +184,8 @@ export default function WalletPage() {
         const result = await response.json();
 
         if (result.success && result.data) {
-          // Save credentials if remember me is checked
-          if (rememberMe) {
+          // Save credentials if remember me is checked (or if explicit creds came from biometrics which implies we want to keep them)
+          if (rememberMe || explicitCreds) {
             const newCreds = { username: user, password: pass };
             localStorage.setItem(CREDENTIALS_KEY, JSON.stringify(newCreds));
             setCredentials(newCreds);
@@ -736,6 +749,14 @@ export default function WalletPage() {
               </div>
             </Drawer>
 
+            {/* Biometric Setup */}
+            <div className="pt-2">
+              <BiometricSetup
+                username={credentials.username}
+                credentials={credentials}
+              />
+            </div>
+
             {/* Logout */}
             <button
               onClick={handleLogout}
@@ -833,21 +854,39 @@ export default function WalletPage() {
 
               <button
                 type="submit"
-                disabled={isLoading || !username || !password}
-                className="w-full py-4 bg-septa-blue hover:bg-septa-blue-bright text-white font-bold rounded-xl transition-all disabled:opacity-60 disabled:cursor-not-allowed flex items-center justify-center gap-2 shadow-lg shadow-septa-blue/20 hover:scale-[1.02] active:scale-[0.98]"
+                disabled={isLoading}
+                className="w-full py-4 bg-septa-blue hover:bg-septa-blue-bright text-white font-bold rounded-xl transition-all disabled:opacity-60 flex items-center justify-center gap-2 shadow-lg shadow-septa-blue/20"
               >
                 {isLoading ? (
-                  <>
-                    <Loader2 className="w-5 h-5 animate-spin" />
-                    Connecting...
-                  </>
+                  <Loader2 className="w-5 h-5 animate-spin" />
                 ) : (
                   <>
-                    Connect Account
+                    Sign In to Wallet
                     <ArrowRight className="w-5 h-5" />
                   </>
                 )}
               </button>
+
+              <div className="relative py-2">
+                <div className="absolute inset-0 flex items-center">
+                  <span className="w-full border-t border-border-default"></span>
+                </div>
+                <div className="relative flex justify-center text-xs uppercase">
+                  <span className="bg-bg-secondary px-2 text-text-muted">
+                    Or
+                  </span>
+                </div>
+              </div>
+
+              {hasBiometrics && (
+                <BiometricLogin
+                  onLoginSuccess={(creds) => {
+                    setUsername(creds.username);
+                    setPassword(creds.password);
+                    fetchBalance(true, creds);
+                  }}
+                />
+              )}
             </form>
 
             {/* Security note */}
