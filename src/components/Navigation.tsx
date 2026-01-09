@@ -1,15 +1,22 @@
-'use client';
+"use client";
 
-import Link from 'next/link';
-import { usePathname, useRouter } from 'next/navigation';
-import { Home, Navigation, Route, Wallet, Heart, ChevronLeft } from 'lucide-react';
+import Link from "next/link";
+import { usePathname, useRouter } from "next/navigation";
+import {
+  Home,
+  Navigation,
+  Route,
+  Wallet,
+  Heart,
+  ChevronLeft,
+} from "lucide-react";
 
 const navItems = [
-  { href: '/', label: 'Home', icon: Home },
-  { href: '/trip', label: 'Trip', icon: Navigation },
-  { href: '/routes', label: 'Routes', icon: Route },
-  { href: '/wallet', label: 'Wallet', icon: Wallet },
-  { href: '/favorites', label: 'Saved', icon: Heart },
+  { href: "/", label: "Home", icon: Home },
+  { href: "/trip", label: "Trip", icon: Navigation },
+  { href: "/routes", label: "Routes", icon: Route },
+  { href: "/wallet", label: "Wallet", icon: Wallet },
+  { href: "/favorites", label: "Saved", icon: Heart },
 ];
 
 export function BottomNav() {
@@ -20,8 +27,9 @@ export function BottomNav() {
       <div className="max-w-lg mx-auto">
         <div className="flex items-center justify-around">
           {navItems.map((item) => {
-            const isActive = pathname === item.href || 
-              (item.href !== '/' && pathname.startsWith(item.href));
+            const isActive =
+              pathname === item.href ||
+              (item.href !== "/" && pathname.startsWith(item.href));
             const Icon = item.icon;
 
             return (
@@ -32,17 +40,24 @@ export function BottomNav() {
                   flex flex-col items-center justify-center
                   py-3 px-4 min-w-[64px]
                   transition-all duration-200
-                  ${isActive 
-                    ? 'text-septa-gold' 
-                    : 'text-text-muted hover:text-text-secondary'
+                  ${
+                    isActive
+                      ? "text-septa-gold"
+                      : "text-text-muted hover:text-text-secondary"
                   }
                 `}
               >
-                <Icon 
-                  className={`w-6 h-6 transition-transform ${isActive ? 'scale-110' : ''}`} 
+                <Icon
+                  className={`w-6 h-6 transition-transform ${
+                    isActive ? "scale-110" : ""
+                  }`}
                   strokeWidth={isActive ? 2.5 : 2}
                 />
-                <span className={`text-xs mt-1 ${isActive ? 'font-semibold' : 'font-medium'}`}>
+                <span
+                  className={`text-xs mt-1 ${
+                    isActive ? "font-semibold" : "font-medium"
+                  }`}
+                >
                   {item.label}
                 </span>
               </Link>
@@ -54,21 +69,25 @@ export function BottomNav() {
   );
 }
 
-export function Header({ 
-  title, 
+export function Header({
+  title,
   showBack = false,
   rightAction,
-}: { 
-  title?: string; 
+  leftAction,
+}: {
+  title?: string;
   showBack?: boolean;
   rightAction?: React.ReactNode;
+  leftAction?: React.ReactNode;
 }) {
   const router = useRouter();
 
   return (
     <header className="sticky top-0 z-40 glass border-b border-border-subtle">
       <div className="max-w-lg mx-auto px-4 h-14 flex items-center justify-between">
-        {showBack ? (
+        {leftAction ? (
+          leftAction
+        ) : showBack ? (
           <button
             onClick={() => router.back()}
             className="flex items-center gap-1 text-text-secondary hover:text-text-primary transition-colors -ml-2 p-2 rounded-lg hover:bg-bg-tertiary"
@@ -83,13 +102,13 @@ export function Header({
             </div>
           </Link>
         )}
-        
+
         {title && (
           <h1 className="font-semibold text-text-primary absolute left-1/2 -translate-x-1/2">
             {title}
           </h1>
         )}
-        
+
         {rightAction || <div className="w-16" />}
       </div>
     </header>
@@ -97,24 +116,20 @@ export function Header({
 }
 
 export function PageContainer({ children }: { children: React.ReactNode }) {
-  return (
-    <div className="min-h-screen bg-bg-primary pb-20">
-      {children}
-    </div>
-  );
+  return <div className="min-h-screen bg-bg-primary pb-20">{children}</div>;
 }
 
 // Floating Action Button for key actions
-export function FAB({ 
-  onClick, 
-  icon: Icon, 
+export function FAB({
+  onClick,
+  icon: Icon,
   label,
-  variant = 'primary' 
-}: { 
-  onClick: () => void; 
-  icon: React.ComponentType<{ className?: string }>; 
+  variant = "primary",
+}: {
+  onClick: () => void;
+  icon: React.ComponentType<{ className?: string }>;
   label: string;
-  variant?: 'primary' | 'secondary';
+  variant?: "primary" | "secondary";
 }) {
   return (
     <button
@@ -124,9 +139,10 @@ export function FAB({
         flex items-center gap-2 px-5 py-3 rounded-full
         font-semibold shadow-lg
         transition-all duration-200 hover:scale-105 active:scale-95
-        ${variant === 'primary' 
-          ? 'bg-septa-blue text-white hover:bg-septa-blue-bright' 
-          : 'bg-bg-elevated text-text-primary border border-border hover:bg-bg-highlight'
+        ${
+          variant === "primary"
+            ? "bg-septa-blue text-white hover:bg-septa-blue-bright"
+            : "bg-bg-elevated text-text-primary border border-border hover:bg-bg-highlight"
         }
       `}
       aria-label={label}

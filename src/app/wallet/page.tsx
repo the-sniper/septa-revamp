@@ -20,6 +20,7 @@ import {
   Lock,
   ArrowRight,
   LogOut,
+  Menu,
 } from "lucide-react";
 import { Header } from "@/components/Navigation";
 import { Drawer } from "@/components/ui/Drawer";
@@ -83,6 +84,7 @@ export default function WalletPage() {
   const [rememberMe, setRememberMe] = useState(true);
   const [showDebug, setShowDebug] = useState(false);
   const [showHistoryDrawer, setShowHistoryDrawer] = useState(false);
+  const [showMenuDrawer, setShowMenuDrawer] = useState(false);
 
   // Add Funds State
   const [showAddFundsDrawer, setShowAddFundsDrawer] = useState(false);
@@ -290,7 +292,17 @@ export default function WalletPage() {
   // Main wallet view
   return (
     <>
-      <Header title="SEPTA Key" />
+      <Header
+        title="SEPTA, That actually works"
+        rightAction={
+          <button
+            onClick={() => setShowMenuDrawer(true)}
+            className="p-2 -mr-2 rounded-xl text-text-secondary hover:bg-bg-tertiary hover:text-text-primary transition-colors"
+          >
+            <Menu className="w-6 h-6" />
+          </button>
+        }
+      />
 
       <main className="px-4 py-6 max-w-lg mx-auto space-y-6">
         {/* Success message */}
@@ -316,7 +328,7 @@ export default function WalletPage() {
           // Connected - show balance
           <>
             {/* Balance Card */}
-            <div className="relative overflow-hidden rounded-3xl bg-gradient-to-br from-septa-gold via-amber-500 to-orange-500 p-6 shadow-xl">
+            <div className="relative overflow-hidden rounded-3xl bg-gradient-to-br from-[#22c55e] via-[#00a550] to-[#15803d] p-6 shadow-xl">
               <div
                 className="absolute inset-0 opacity-20"
                 onClick={() => setShowDebug(!showDebug)} // Secret toggle
@@ -421,39 +433,28 @@ export default function WalletPage() {
             )}
 
             {/* Action Cards */}
-            <div className="grid grid-cols-2 gap-3">
+            <div className="grid grid-cols-1 gap-3">
               <a
                 href={SEPTA_URLS.dashboard}
                 target="_blank"
                 rel="noopener noreferrer"
-                className="p-4 rounded-xl bg-bg-secondary border border-border-subtle text-center hover:border-septa-blue/30 transition-colors group"
+                className="p-4 rounded-xl bg-bg-secondary border border-border-subtle text-center hover:border-septa-blue/30 transition-colors group flex items-center justify-between px-6"
               >
-                <div className="w-10 h-10 rounded-full bg-septa-blue/10 flex items-center justify-center mx-auto mb-3 group-hover:bg-septa-blue/20 transition-colors">
-                  <ExternalLink className="w-5 h-5 text-septa-blue" />
+                <div className="flex items-center gap-4">
+                  <div className="w-10 h-10 rounded-full bg-septa-blue/10 flex items-center justify-center group-hover:bg-septa-blue/20 transition-colors">
+                    <ExternalLink className="w-5 h-5 text-septa-blue" />
+                  </div>
+                  <div className="text-left">
+                    <p className="font-semibold text-text-primary text-sm">
+                      View Account
+                    </p>
+                    <p className="text-xs text-text-muted mt-0.5">
+                      On SEPTA Site
+                    </p>
+                  </div>
                 </div>
-                <p className="font-semibold text-text-primary text-sm">
-                  View Account
-                </p>
-                <p className="text-xs text-text-muted mt-1">On SEPTA Site</p>
+                <ArrowRight className="w-5 h-5 text-text-muted group-hover:translate-x-1 transition-transform" />
               </a>
-              <button
-                onClick={() => fetchBalance(true)}
-                disabled={isLoading}
-                className="p-4 rounded-xl bg-bg-secondary border border-border-subtle text-center hover:border-live/30 transition-colors disabled:opacity-60 group"
-              >
-                <div className="w-10 h-10 rounded-full bg-live/10 flex items-center justify-center mx-auto mb-3 group-hover:bg-live/20 transition-colors">
-                  <RefreshCw
-                    className={`w-5 h-5 text-live ${
-                      isLoading ? "animate-spin" : ""
-                    }`}
-                  />
-                </div>
-
-                <p className="font-semibold text-text-primary text-sm">
-                  Sync Balance
-                </p>
-                <p className="text-xs text-text-muted mt-1">Latest Data</p>
-              </button>
             </div>
 
             {/* Transaction History */}
@@ -541,6 +542,55 @@ export default function WalletPage() {
                 </button>
               </div>
             </section>
+
+            {/* Menu Drawer */}
+            <Drawer
+              isOpen={showMenuDrawer}
+              onClose={() => setShowMenuDrawer(false)}
+              title=""
+            >
+              <div className="space-y-6 pt-2">
+                {/* User Info */}
+                <div className="flex items-center gap-4 p-4 rounded-xl bg-bg-secondary border border-border-subtle">
+                  <div className="w-12 h-12 rounded-full bg-septa-green/10 flex items-center justify-center text-septa-green font-bold text-xl uppercase">
+                    {credentials?.username?.slice(0, 2) || "USER"}
+                  </div>
+                  <div>
+                    <p className="font-semibold text-text-primary">
+                      {credentials?.username || "Guest User"}
+                    </p>
+                    <p className="text-xs text-text-muted">
+                      Connected to SEPTA Key
+                    </p>
+                  </div>
+                </div>
+
+                {/* Settings Section */}
+                <div className="space-y-4">
+                  <h3 className="text-sm font-semibold text-text-secondary uppercase tracking-wider px-1">
+                    Security & Account
+                  </h3>
+
+                  <BiometricSetup
+                    username={credentials?.username ?? ""}
+                    credentials={credentials!}
+                  />
+                </div>
+
+                {/* Logout */}
+                <button
+                  onClick={handleLogout}
+                  className="w-full h-12 flex items-center justify-center gap-2 bg-red-50 border border-red-100 text-red-600 hover:bg-red-100 hover:border-red-200 transition-all font-semibold rounded-xl shadow-sm text-sm"
+                >
+                  <LogOut className="w-5 h-5" />
+                  Sign Out of Wallet
+                </button>
+
+                <p className="text-center text-xs text-text-muted pt-4">
+                  Version 2.1.0 • SEPTA Reimagined
+                </p>
+              </div>
+            </Drawer>
 
             {/* Add Funds Drawer */}
             <Drawer
@@ -748,23 +798,6 @@ export default function WalletPage() {
                 )}
               </div>
             </Drawer>
-
-            {/* Biometric Setup */}
-            <div className="pt-2">
-              <BiometricSetup
-                username={credentials.username}
-                credentials={credentials}
-              />
-            </div>
-
-            {/* Logout */}
-            <button
-              onClick={handleLogout}
-              className="w-full p-3 rounded-xl bg-bg-secondary border border-border-subtle flex items-center justify-center gap-2 text-text-muted hover:text-urgent hover:border-urgent/30 transition-colors text-sm"
-            >
-              <LogOut className="w-4 h-4" />
-              Sign Out & Clear Data
-            </button>
           </>
         ) : (
           // Not connected - show login

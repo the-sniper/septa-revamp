@@ -1,8 +1,8 @@
-'use client';
+"use client";
 
-import { useState, useEffect, useCallback } from 'react';
-import { useParams } from 'next/navigation';
-import Link from 'next/link';
+import { useState, useEffect, useCallback } from "react";
+import { useParams } from "next/navigation";
+import Link from "next/link";
 import {
   MapPin,
   Heart,
@@ -12,13 +12,21 @@ import {
   ExternalLink,
   AlertTriangle,
   Share2,
-} from 'lucide-react';
-import { Header } from '@/components/Navigation';
-import { DepartureRowCompact, DepartureRowSkeleton } from '@/components/DepartureRow';
-import { useFavorites, useRecents } from '@/lib/store';
-import { useCopyToClipboard, useInterval, useOnlineStatus } from '@/lib/hooks';
-import { getStopById, getRealTimeArrivals, getRouteAlerts, SEPTA_ROUTES } from '@/lib/septa-api';
-import type { Stop, Arrival, Alert, TransitMode } from '@/lib/types';
+} from "lucide-react";
+import { Header } from "@/components/Navigation";
+import {
+  DepartureRowCompact,
+  DepartureRowSkeleton,
+} from "@/components/DepartureRow";
+import { useFavorites, useRecents } from "@/lib/store";
+import { useCopyToClipboard, useInterval, useOnlineStatus } from "@/lib/hooks";
+import {
+  getStopById,
+  getRealTimeArrivals,
+  getRouteAlerts,
+  SEPTA_ROUTES,
+} from "@/lib/septa-api";
+import type { Stop, Arrival, Alert, TransitMode } from "@/lib/types";
 
 export default function StopPage() {
   const params = useParams();
@@ -32,7 +40,8 @@ export default function StopPage() {
   const [error, setError] = useState<string | null>(null);
   const [lastUpdated, setLastUpdated] = useState<Date | null>(null);
 
-  const { isFavoriteStop, addFavoriteStop, removeFavoriteStop } = useFavorites();
+  const { isFavoriteStop, addFavoriteStop, removeFavoriteStop } =
+    useFavorites();
   const { addRecentItem } = useRecents();
   const { copied, copy } = useCopyToClipboard();
   const isOnline = useOnlineStatus();
@@ -45,7 +54,7 @@ export default function StopPage() {
     if (stopData) {
       setStop(stopData);
       addRecentItem({
-        type: 'stop',
+        type: "stop",
         id: stopData.stopId,
         title: stopData.stopName,
         subtitle: `Stop #${stopData.stopId}`,
@@ -54,27 +63,30 @@ export default function StopPage() {
   }, [stopId, addRecentItem]);
 
   // Fetch arrivals
-  const fetchArrivals = useCallback(async (showLoading = true) => {
-    if (showLoading) setIsLoading(true);
-    else setIsRefreshing(true);
+  const fetchArrivals = useCallback(
+    async (showLoading = true) => {
+      if (showLoading) setIsLoading(true);
+      else setIsRefreshing(true);
 
-    try {
-      const response = await getRealTimeArrivals(stopId);
+      try {
+        const response = await getRealTimeArrivals(stopId);
 
-      if (response.error && !response.data) {
-        setError(response.error);
-      } else {
-        setArrivals(response.data || []);
-        setError(null);
-        setLastUpdated(new Date());
+        if (response.error && !response.data) {
+          setError(response.error);
+        } else {
+          setArrivals(response.data || []);
+          setError(null);
+          setLastUpdated(new Date());
+        }
+      } catch {
+        setError("Failed to fetch arrivals");
+      } finally {
+        setIsLoading(false);
+        setIsRefreshing(false);
       }
-    } catch {
-      setError('Failed to fetch arrivals');
-    } finally {
-      setIsLoading(false);
-      setIsRefreshing(false);
-    }
-  }, [stopId]);
+    },
+    [stopId]
+  );
 
   useEffect(() => {
     fetchArrivals();
@@ -98,9 +110,14 @@ export default function StopPage() {
         }
       }
       const uniqueAlerts = allAlerts.filter(
-        (alert, index, self) => self.findIndex((a) => a.alertId === alert.alertId) === index
+        (alert, index, self) =>
+          self.findIndex((a) => a.alertId === alert.alertId) === index
       );
-      setAlerts(uniqueAlerts.filter(a => a.severity === 'severe' || a.severity === 'warning'));
+      setAlerts(
+        uniqueAlerts.filter(
+          (a) => a.severity === "severe" || a.severity === "warning"
+        )
+      );
     }
     fetchAlerts();
   }, [stop]);
@@ -137,7 +154,9 @@ export default function StopPage() {
         <div className="max-w-lg mx-auto px-4 py-8">
           <div className="card p-8 text-center">
             <MapPin className="w-12 h-12 text-text-muted mx-auto mb-4" />
-            <h2 className="text-lg font-semibold text-text-primary mb-2">Stop not found</h2>
+            <h2 className="text-lg font-semibold text-text-primary mb-2">
+              Stop not found
+            </h2>
             <p className="text-sm text-text-secondary">
               We couldn&apos;t find a stop with ID {stopId}
             </p>
@@ -153,12 +172,18 @@ export default function StopPage() {
 
   const getRouteColor = (type: TransitMode) => {
     switch (type) {
-      case 'bus': return 'bg-mode-bus';
-      case 'trolley': return 'bg-mode-trolley';
-      case 'subway': return 'bg-mode-subway-mfl';
-      case 'regional_rail': return 'bg-mode-rail';
-      case 'nhsl': return 'bg-mode-nhsl';
-      default: return 'bg-mode-bus';
+      case "bus":
+        return "bg-mode-bus";
+      case "trolley":
+        return "bg-mode-trolley";
+      case "subway":
+        return "bg-mode-subway-mfl";
+      case "regional_rail":
+        return "bg-mode-rail";
+      case "nhsl":
+        return "bg-mode-nhsl";
+      default:
+        return "bg-mode-bus";
     }
   };
 
@@ -179,7 +204,9 @@ export default function StopPage() {
                 className="flex items-center gap-2 mt-2 px-3 py-1.5 bg-bg-tertiary rounded-lg hover:bg-bg-highlight transition-colors"
               >
                 <span className="text-sm text-text-muted">Stop</span>
-                <span className="font-mono font-semibold text-text-primary">#{stop.stopId}</span>
+                <span className="font-mono font-semibold text-text-primary">
+                  #{stop.stopId}
+                </span>
                 {copied ? (
                   <Check className="w-4 h-4 text-live" />
                 ) : (
@@ -198,13 +225,17 @@ export default function StopPage() {
               <button
                 onClick={handleFavorite}
                 className={`p-3 rounded-xl transition-colors ${
-                  isFavorite 
-                    ? 'bg-urgent/10 text-urgent' 
-                    : 'bg-bg-tertiary hover:bg-bg-highlight text-text-secondary'
+                  isFavorite
+                    ? "bg-urgent/10 text-urgent"
+                    : "bg-bg-tertiary hover:bg-bg-highlight text-text-secondary"
                 }`}
-                aria-label={isFavorite ? 'Remove from favorites' : 'Add to favorites'}
+                aria-label={
+                  isFavorite ? "Remove from favorites" : "Add to favorites"
+                }
               >
-                <Heart className={`w-5 h-5 ${isFavorite ? 'fill-current' : ''}`} />
+                <Heart
+                  className={`w-5 h-5 ${isFavorite ? "fill-current" : ""}`}
+                />
               </button>
             </div>
           </div>
@@ -213,7 +244,11 @@ export default function StopPage() {
           <div className="flex flex-wrap gap-2">
             {stopRoutes.map((route) => (
               <Link key={route!.routeId} href={`/route/${route!.routeId}`}>
-                <span className={`${getRouteColor(route!.routeType)} route-badge text-white hover:scale-105 transition-transform inline-block`}>
+                <span
+                  className={`${getRouteColor(
+                    route!.routeType as TransitMode
+                  )} route-badge text-white hover:scale-105 transition-transform inline-block`}
+                >
                   {route!.routeShortName}
                 </span>
               </Link>
@@ -228,7 +263,8 @@ export default function StopPage() {
               <AlertTriangle className="w-5 h-5 text-urgent flex-shrink-0" />
               <div className="flex-1 min-w-0">
                 <p className="text-sm font-medium text-urgent">
-                  {alerts.length} alert{alerts.length > 1 ? 's' : ''} affecting this stop
+                  {alerts.length} alert{alerts.length > 1 ? "s" : ""} affecting
+                  this stop
                 </p>
                 <p className="text-xs text-text-muted truncate mt-0.5">
                   {alerts[0]?.title}
@@ -245,16 +281,23 @@ export default function StopPage() {
               <h2 className="text-lg font-bold text-text-primary">Arriving</h2>
               {lastUpdated && (
                 <span className="text-xs text-text-muted">
-                  {lastUpdated.toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' })}
+                  {lastUpdated.toLocaleTimeString([], {
+                    hour: "numeric",
+                    minute: "2-digit",
+                  })}
                 </span>
               )}
             </div>
-            <button 
+            <button
               onClick={() => fetchArrivals(false)}
               className="p-2 rounded-lg hover:bg-bg-tertiary transition-colors"
               disabled={isRefreshing}
             >
-              <RefreshCw className={`w-4 h-4 text-text-muted ${isRefreshing ? 'animate-spin' : ''}`} />
+              <RefreshCw
+                className={`w-4 h-4 text-text-muted ${
+                  isRefreshing ? "animate-spin" : ""
+                }`}
+              />
             </button>
           </div>
 
@@ -279,7 +322,9 @@ export default function StopPage() {
             ) : arrivals.length === 0 ? (
               <div className="p-8 text-center">
                 <MapPin className="w-10 h-10 text-text-muted mx-auto mb-3" />
-                <p className="font-medium text-text-primary">No upcoming arrivals</p>
+                <p className="font-medium text-text-primary">
+                  No upcoming arrivals
+                </p>
                 <p className="text-sm text-text-secondary mt-1">
                   Check back later or view the schedule
                 </p>
@@ -287,13 +332,15 @@ export default function StopPage() {
             ) : (
               <div className="p-4">
                 {arrivals.slice(0, 10).map((arrival, index) => {
-                  const route = SEPTA_ROUTES.find(r => r.routeId === arrival.routeId);
+                  const route = SEPTA_ROUTES.find(
+                    (r) => r.routeId === arrival.routeId
+                  );
                   return (
                     <DepartureRowCompact
                       key={`${arrival.tripId}-${index}`}
                       arrival={arrival}
                       stopName={stop.stopName}
-                      routeType={route?.routeType}
+                      routeType={route?.routeType as TransitMode}
                     />
                   );
                 })}
@@ -316,18 +363,28 @@ export default function StopPage() {
 
         {/* Routes at Stop */}
         <section>
-          <h2 className="text-lg font-bold text-text-primary mb-4">Routes here</h2>
+          <h2 className="text-lg font-bold text-text-primary mb-4">
+            Routes here
+          </h2>
           <div className="space-y-2">
             {stopRoutes.map((route) => (
               <Link key={route!.routeId} href={`/route/${route!.routeId}`}>
                 <div className="card p-4 flex items-center gap-4 hover:bg-bg-highlight transition-colors">
-                  <span className={`${getRouteColor(route!.routeType)} route-badge text-white min-w-[52px] text-center`}>
+                  <span
+                    className={`${getRouteColor(
+                      route!.routeType as TransitMode
+                    )} route-badge text-white min-w-[52px] text-center`}
+                  >
                     {route!.routeShortName}
                   </span>
                   <div className="flex-1 min-w-0">
-                    <p className="font-medium text-text-primary">{route!.routeLongName}</p>
+                    <p className="font-medium text-text-primary">
+                      {route!.routeLongName}
+                    </p>
                     <p className="text-sm text-text-muted truncate">
-                      {route!.directions.map((d) => d.destinationName).join(' ↔ ')}
+                      {route!.directions
+                        .map((d) => d.destinationName)
+                        .join(" ↔ ")}
                     </p>
                   </div>
                 </div>
@@ -339,7 +396,12 @@ export default function StopPage() {
         {/* Quick Actions */}
         <div className="flex gap-3">
           <button
-            onClick={() => window.open(`https://www.google.com/maps?q=${stop.lat},${stop.lng}`, '_blank')}
+            onClick={() =>
+              window.open(
+                `https://www.google.com/maps?q=${stop.lat},${stop.lng}`,
+                "_blank"
+              )
+            }
             className="btn btn-secondary flex-1"
           >
             <ExternalLink className="w-4 h-4" />
@@ -349,8 +411,12 @@ export default function StopPage() {
             onClick={() => copy(stopId)}
             className="btn btn-secondary flex-1"
           >
-            {copied ? <Check className="w-4 h-4" /> : <Copy className="w-4 h-4" />}
-            {copied ? 'Copied!' : 'Copy ID'}
+            {copied ? (
+              <Check className="w-4 h-4" />
+            ) : (
+              <Copy className="w-4 h-4" />
+            )}
+            {copied ? "Copied!" : "Copy ID"}
           </button>
         </div>
       </div>

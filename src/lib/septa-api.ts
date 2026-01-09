@@ -894,4 +894,22 @@ export function getStopById(stopId: string) {
     return SAMPLE_STOPS.find(s => s.stopId === stopId) || null;
 }
 
+export function searchStopsAndRoutes(query: string) {
+  if (!query) return [];
+  const q = query.toLowerCase();
+  
+  const matchingRoutes = SEPTA_ROUTES.filter(r => 
+    r.routeId.toLowerCase().includes(q) || 
+    r.routeShortName.toLowerCase().includes(q) || 
+    r.routeLongName.toLowerCase().includes(q)
+  );
+
+  const matchingStops = SAMPLE_STOPS.filter(s => 
+    s.stopId.includes(q) || 
+    s.stopName.toLowerCase().includes(q)
+  );
+
+  return [...matchingRoutes, ...matchingStops];
+}
+
 

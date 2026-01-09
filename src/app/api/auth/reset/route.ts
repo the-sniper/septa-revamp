@@ -1,6 +1,6 @@
 
 import { NextResponse } from 'next/server';
-import { getUserByUsername, supabaseAdmin } from '@/lib/db';
+import { getUserByUsername } from '@/lib/db';
 
 // We need to export this from db.ts or just import the admin client directly as we do here.
 // But we need to update db.ts to export supabaseAdmin if it's not already,

@@ -29,6 +29,8 @@ export default {
           'blue-bright': 'var(--septa-blue-bright)',
           gold: 'var(--septa-gold)',
           'gold-bright': 'var(--septa-gold-bright)',
+          green: 'var(--septa-green)',
+          'green-bright': 'var(--septa-green-bright)',
         },
         // Transit modes
         mode: {

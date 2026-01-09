@@ -136,7 +136,13 @@ export function BiometricSetup({
     }
   };
 
-  if (checking) return null;
+  if (checking) {
+    return (
+      <div className="w-full h-12 flex items-center justify-center gap-2 bg-bg-tertiary border border-border-default rounded-xl shadow-sm animate-pulse">
+        <Loader2 className="w-5 h-5 text-text-muted animate-spin" />
+      </div>
+    );
+  }
 
   return (
     <div className="space-y-2">
@@ -151,7 +157,7 @@ export function BiometricSetup({
         <button
           onClick={handleSetup}
           disabled={loading}
-          className="w-full flex items-center justify-center gap-2 bg-white border border-gray-200 text-gray-700 hover:bg-gray-50 hover:border-gray-300 transition-all font-semibold py-3 px-4 rounded-xl shadow-sm text-sm"
+          className="w-full h-12 flex items-center justify-center gap-2 bg-white border border-gray-200 text-gray-700 hover:bg-gray-50 hover:border-gray-300 transition-all font-semibold rounded-xl shadow-sm text-sm"
         >
           {loading ? (
             <Loader2 className="w-5 h-5 animate-spin" />
@@ -164,7 +170,7 @@ export function BiometricSetup({
         <button
           onClick={handleDisable}
           disabled={loading}
-          className="w-full flex items-center justify-center gap-2 bg-red-50 border border-red-100 text-red-600 hover:bg-red-100 hover:border-red-200 transition-all font-semibold py-3 px-4 rounded-xl shadow-sm text-sm"
+          className="w-full h-12 flex items-center justify-center gap-2 bg-bg-tertiary border border-border-default text-text-primary hover:bg-bg-highlight hover:border-border-strong transition-all font-semibold rounded-xl shadow-sm text-sm"
         >
           {loading ? (
             <Loader2 className="w-5 h-5 animate-spin" />

@@ -3,8 +3,8 @@
 @tailwind utilities;
 
 /* Distinctive fonts - Satoshi for UI, Space Mono for numbers */
-@import url('https://api.fontshare.com/v2/css?f[]=satoshi@400,500,700,900&display=swap');
-@import url('https://fonts.googleapis.com/css2?family=Space+Mono:wght@400;700&display=swap');
+@import url("https://api.fontshare.com/v2/css?f[]=satoshi@400,500,700,900&display=swap");
+@import url("https://fonts.googleapis.com/css2?family=Space+Mono:wght@400;700&display=swap");
 
 :root {
   /* Core palette - dark-first, high contrast */
@@ -13,26 +13,28 @@
   --bg-tertiary: #1a2332;
   --bg-elevated: #1f2937;
   --bg-highlight: #243044;
-  
+
   /* Text */
   --text-primary: #f9fafb;
   --text-secondary: #9ca3af;
   --text-muted: #6b7280;
-  
+
   /* Brand colors - SEPTA inspired but more vibrant */
   --septa-blue: #3b82f6;
   --septa-blue-bright: #60a5fa;
   --septa-gold: #fbbf24;
   --septa-gold-bright: #fcd34d;
-  
+  --septa-green: #00a550;
+  --septa-green-bright: #22c55e;
+
   /* Transit mode colors - Official SEPTA palette */
-  --mode-bus: #004F9F;         /* SEPTA Bus Blue */
-  --mode-trolley: #00A550;     /* SEPTA Trolley Green */
-  --mode-subway-mfl: #0066CC;  /* Market-Frankford Line Blue */
-  --mode-subway-bsl: #F37021;  /* Broad Street Line Orange */
-  --mode-rail: #91456C;        /* Regional Rail Burgundy */
-  --mode-nhsl: #9B2D9B;        /* Norristown High Speed Line Purple */
-  
+  --mode-bus: #004f9f; /* SEPTA Bus Blue */
+  --mode-trolley: #00a550; /* SEPTA Trolley Green */
+  --mode-subway-mfl: #0066cc; /* Market-Frankford Line Blue */
+  --mode-subway-bsl: #f37021; /* Broad Street Line Orange */
+  --mode-rail: #91456c; /* Regional Rail Burgundy */
+  --mode-nhsl: #9b2d9b; /* Norristown High Speed Line Purple */
+
   /* Status colors */
   --live: #22c55e;
   --live-glow: rgba(34, 197, 94, 0.3);
@@ -41,12 +43,12 @@
   --urgent: #ef4444;
   --urgent-glow: rgba(239, 68, 68, 0.3);
   --delayed: #f97316;
-  
+
   /* Borders */
   --border-subtle: rgba(255, 255, 255, 0.06);
   --border-default: rgba(255, 255, 255, 0.1);
   --border-strong: rgba(255, 255, 255, 0.15);
-  
+
   /* Shadows */
   --shadow-glow: 0 0 30px rgba(59, 130, 246, 0.15);
   --shadow-card: 0 4px 20px rgba(0, 0, 0, 0.4);
@@ -83,8 +85,8 @@ html {
 body {
   background: var(--bg-primary);
   color: var(--text-primary);
-  font-family: 'Satoshi', system-ui, -apple-system, sans-serif;
-  font-feature-settings: 'ss01' on, 'ss02' on;
+  font-family: "Satoshi", system-ui, -apple-system, sans-serif;
+  font-feature-settings: "ss01" on, "ss02" on;
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;
   min-height: 100vh;
@@ -93,7 +95,7 @@ body {
 
 /* Monospace for times/numbers */
 .font-mono {
-  font-family: 'Space Mono', ui-monospace, monospace;
+  font-family: "Space Mono", ui-monospace, monospace;
 }
 
 /* Custom scrollbar - minimal */
@@ -127,7 +129,8 @@ body {
 
 /* Live pulse - for real-time indicators */
 @keyframes pulse-live {
-  0%, 100% {
+  0%,
+  100% {
     opacity: 1;
     transform: scale(1);
   }
@@ -139,7 +142,8 @@ body {
 
 /* Countdown urgency pulse */
 @keyframes pulse-urgent {
-  0%, 100% {
+  0%,
+  100% {
     opacity: 1;
   }
   50% {
@@ -161,8 +165,12 @@ body {
 
 /* Fade in */
 @keyframes fade-in {
-  from { opacity: 0; }
-  to { opacity: 1; }
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
+  }
 }
 
 /* Scale in */
@@ -179,7 +187,8 @@ body {
 
 /* Glow pulse for live status */
 @keyframes glow-pulse {
-  0%, 100% {
+  0%,
+  100% {
     box-shadow: 0 0 4px var(--live);
   }
   50% {
@@ -222,12 +231,24 @@ body {
 }
 
 /* Stagger animations */
-.stagger-1 { animation-delay: 50ms; }
-.stagger-2 { animation-delay: 100ms; }
-.stagger-3 { animation-delay: 150ms; }
-.stagger-4 { animation-delay: 200ms; }
-.stagger-5 { animation-delay: 250ms; }
-.stagger-6 { animation-delay: 300ms; }
+.stagger-1 {
+  animation-delay: 50ms;
+}
+.stagger-2 {
+  animation-delay: 100ms;
+}
+.stagger-3 {
+  animation-delay: 150ms;
+}
+.stagger-4 {
+  animation-delay: 200ms;
+}
+.stagger-5 {
+  animation-delay: 250ms;
+}
+.stagger-6 {
+  animation-delay: 300ms;
+}
 
 /* Loading skeleton shimmer */
 .skeleton {
@@ -252,12 +273,19 @@ body {
 
 /* Gradient backgrounds */
 .gradient-radial {
-  background: radial-gradient(ellipse at top, var(--bg-secondary), var(--bg-primary));
+  background: radial-gradient(
+    ellipse at top,
+    var(--bg-secondary),
+    var(--bg-primary)
+  );
 }
 
 .gradient-mesh {
-  background: 
-    radial-gradient(at 40% 20%, rgba(59, 130, 246, 0.1) 0px, transparent 50%),
+  background: radial-gradient(
+      at 40% 20%,
+      rgba(59, 130, 246, 0.1) 0px,
+      transparent 50%
+    ),
     radial-gradient(at 80% 0%, rgba(168, 85, 247, 0.1) 0px, transparent 50%),
     radial-gradient(at 0% 50%, rgba(34, 197, 94, 0.05) 0px, transparent 50%),
     var(--bg-primary);
@@ -316,7 +344,7 @@ body {
 
 /* Route badge base */
 .route-badge {
-  font-family: 'Space Mono', monospace;
+  font-family: "Space Mono", monospace;
   font-weight: 700;
   padding: 0.25rem 0.5rem;
   border-radius: 6px;
