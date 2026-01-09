@@ -80,6 +80,7 @@ export async function loginToSepta(username: string, password: string): Promise<
     
     // 3. FETCH WALLET DATA
     let walletData = null;
+    let tripsData: any[] = [];
 
     if (userIdString) {
       const walletUrl = `${SEPTA_API_BASE}/indv_users/${userIdString}/keycard_details`;
@@ -95,6 +96,69 @@ export async function loginToSepta(username: string, password: string): Promise<
 
       if (walletResponse.ok) {
         walletData = await walletResponse.json();
+        
+        // 4. FETCH TRIPS
+        let debugInfo = '';
+        try {
+            // Find keycard ID
+            let keycardId = null;
+            let cardObj = null;
+
+            if (Array.isArray(walletData)) {
+                // @ts-ignore
+                cardObj = walletData.find((c: any) => c.status === 'Active') || walletData[0];
+            } else if (walletData && typeof walletData === 'object') {
+                 // @ts-ignore
+                if (walletData.keycards && Array.isArray(walletData.keycards)) {
+                    // @ts-ignore
+                    cardObj = walletData.keycards[0];
+                } else {
+                     // @ts-ignore
+                    cardObj = walletData;
+                }
+            }
+
+            if (cardObj) {
+                keycardId = cardObj.keycard_id || cardObj.id || cardObj.key || findStringId(cardObj);
+            }
+            
+            if (keycardId && userIdString) {
+                // Add a small delay to avoid race conditions or rate limits
+                await new Promise(r => setTimeout(r, 500));
+
+                // Fetch trips (10 - strictly sticking to what we know works to avoid Incapsula blocks)
+                const tripsUrl = `${SEPTA_API_BASE}/indv_users/${userIdString}/keycards/${keycardId}/trips?start_index=1&end_index=10&sort=desc`;
+                
+                const tripsResponse = await fetch(tripsUrl, {
+                    method: 'GET',
+                    headers: {
+                      ...COMMON_HEADERS,
+                      'Referer': 'https://www.septakey.org/indv/dashboard', // More specific referer
+                      'Cookie': cookieString,
+                      'X-Authorization': `Bearer ${accessToken}`, 
+                    },
+                });
+
+                if (tripsResponse.ok) {
+                    const text = await tripsResponse.text();
+                    try {
+                        tripsData = JSON.parse(text);
+                    } catch (jsonError) {
+                       console.error('[SEPTA-API] Failed to parse trips JSON. Response was:', text.substring(0, 200));
+                    }
+                } else {
+                    const err = await tripsResponse.text();
+                    console.error(`[SEPTA-API] Trips fetch failed (${tripsResponse.status}): ${err}`);
+                    debugInfo = `Trips fetch failed: ${tripsResponse.status}`;
+                }
+            } else {
+                debugInfo = `Missing IDs: User=${!!userIdString}, Card=${!!keycardId}`;
+            }
+        } catch (e) {
+            console.error('[SEPTA-API] Trip fetch exception:', e);
+            debugInfo = `Trip exception: ${e instanceof Error ? e.message : String(e)}`;
+        }
+
       } else {
         const errText = await walletResponse.text();
         console.error(`[SEPTA-API] Wallet fetch failed (${walletResponse.status}): ${errText}`);
@@ -103,6 +167,7 @@ export async function loginToSepta(username: string, password: string): Promise<
             error: `Wallet fetch failed: ${walletResponse.status}`
         };
       }
+
     } else {
       console.error('[SEPTA-API] Could not find User ID to fetch wallet');
       return {
@@ -113,7 +178,8 @@ export async function loginToSepta(username: string, password: string): Promise<
 
     return { 
       success: true, 
-      data: walletData || loginData
+      // @ts-ignore
+      data: { ...(Array.isArray(walletData) ? { cards: walletData } : walletData), trips: tripsData }
     };
 
   } catch (error) {
@@ -213,25 +279,32 @@ export function formatSeptaData(apiData: any) {
           cardNumber: null, 
           pass: null, 
           lastUpdated: new Date().toISOString(), 
+          transactions: [],
           raw: null 
       };
   }
 
   // Handle array response (it's an array of cards)
   let card = apiData;
-  if (Array.isArray(apiData)) {
+  
+  // Check for our wrapper
+  if (apiData.cards && Array.isArray(apiData.cards)) {
+      card = apiData.cards.find((c: any) => c.status === 'Active') || apiData.cards[0];
+  } else if (Array.isArray(apiData)) {
     if (apiData.length === 0) {
         return { 
             balance: 0, 
             cardNumber: null, 
             pass: null, 
             lastUpdated: new Date().toISOString(), 
+            transactions: [],
             raw: apiData 
         };
     }
     // Find the active card, or just take the first one
     card = apiData.find((c: any) => c.status === 'Active') || apiData[0];
   } else if (apiData.keycards && Array.isArray(apiData.keycards)) {
+    // @ts-ignore
     card = apiData.keycards[0];
   }
   
@@ -242,6 +315,7 @@ export function formatSeptaData(apiData: any) {
           cardNumber: null, 
           pass: null, 
           lastUpdated: new Date().toISOString(), 
+          transactions: [],
           raw: apiData 
       };
   }
@@ -263,12 +337,67 @@ export function formatSeptaData(apiData: any) {
   // Extract pass name from products
   const pass = mapPass(card.products);
 
+  // Map trips to transactions
+  // Proposed Trip Structure from standard SEPTA API: { start_time: "...", amount: 2.00, route_name: "...", etc }
+  // Map trips to transactions
+  let rawTrips = apiData.trips;
+  
+  // Normalize rawTrips to be an array
+  if (rawTrips) {
+      if (!Array.isArray(rawTrips)) {
+          // If it's an object, look for likely array properties
+          if (Array.isArray(rawTrips.result)) rawTrips = rawTrips.result; // FOUND THIS!
+          else if (Array.isArray(rawTrips.results)) rawTrips = rawTrips.results;
+          else if (Array.isArray(rawTrips.trips)) rawTrips = rawTrips.trips;
+          else if (Array.isArray(rawTrips.data)) rawTrips = rawTrips.data;
+          else if (Array.isArray(rawTrips.history)) rawTrips = rawTrips.history;
+          else rawTrips = []; // Could not find array
+      }
+  } else {
+      rawTrips = [];
+  }
+
+  let transactions: any[] = [];
+  if (rawTrips && Array.isArray(rawTrips)) {
+      transactions = rawTrips.map((t: any) => {
+          // 1. AMOUNT
+          const amount = Math.abs(parseFloat(t.amount || t.fare_amount || t.debit_amount || t.cost || 0));
+          
+          // 2. DESCRIPTION
+          let desc = 'Trip';
+          if (t.entry_stop) desc = t.entry_stop; // Found in logs
+          else if (t.stop_name) desc = t.stop_name;
+          else if (t.location) desc = t.location;
+          else if (t.route_name) desc = t.route_name;
+          else if (t.description) desc = t.description;
+          else if (t.agency) desc = `${t.agency} Trip`;
+          
+          // Add route info if available
+          const route = t.entry_route || t.route_id || t.route_name;
+          if (route && !desc.includes(route)) {
+              desc = `${desc} (${route})`;
+          }
+
+          // 3. TIMESTAMP
+          const timestamp = t.entry_time || t.start_time || t.transaction_date || t.date || t.timestamp || new Date().toISOString();
+
+          return {
+              id: t.trip_id ? String(t.trip_id) : (t.id || t.transit_id || Math.random().toString()),
+              type: 'debit',
+              amount: amount,
+              description: desc,
+              timestamp: timestamp,
+          };
+      });
+  }
+
   return {
     balance,
-    cardNumber: cardNumber ? cardNumber.replace(/\*/g, '') : null, // Clean up masking if needed
+    cardNumber: cardNumber ? cardNumber.replace(/\*/g, '') : null,
     pass,
     lastUpdated: new Date().toISOString(),
-    raw: apiData // Keep raw data for debugging if needed but UI won't use it
+    transactions,
+    raw: apiData 
   };
 }
 

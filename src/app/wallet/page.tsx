@@ -22,6 +22,7 @@ import {
   LogOut,
 } from "lucide-react";
 import { Header } from "@/components/Navigation";
+import { Drawer } from "@/components/ui/Drawer";
 
 // Storage keys
 const CREDENTIALS_KEY = "septa-credentials";
@@ -32,18 +33,6 @@ const SEPTA_URLS = {
   home: "https://www.septakey.org",
   addFunds: "https://www.septakey.org/AddValue",
   dashboard: "https://www.septakey.org/Dashboard",
-};
-
-// SEPTA fare rates (as of 2024)
-const FARE_RATES = {
-  bus: 2.5,
-  trolley: 2.5,
-  subway: 2.5,
-  regional_rail_zone1: 3.75,
-  regional_rail_zone2: 4.75,
-  regional_rail_zone3: 5.5,
-  regional_rail_zone4: 6.5,
-  transfer: 1.0,
 };
 
 interface StoredCredentials {
@@ -57,6 +46,7 @@ interface WalletData {
   pass: string | null;
   lastUpdated: string;
   transactions: Transaction[];
+  raw?: any;
 }
 
 interface Transaction {
@@ -79,20 +69,20 @@ export default function WalletPage() {
   const [password, setPassword] = useState("");
   const [showPassword, setShowPassword] = useState(false);
   const [rememberMe, setRememberMe] = useState(true);
+  const [showDebug, setShowDebug] = useState(false);
+  const [showHistoryDrawer, setShowHistoryDrawer] = useState(false);
 
   // Loading states
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [successMessage, setSuccessMessage] = useState<string | null>(null);
 
-  // Modal states
-  const [showDeductFare, setShowDeductFare] = useState(false);
-  const [selectedFare, setSelectedFare] = useState<string | null>(null);
-  const [customFare, setCustomFare] = useState("");
-
   // Load data from localStorage on mount
   useEffect(() => {
     setMounted(true);
+
+    let savedUsername = "";
+    let savedPassword = "";
 
     // Load credentials
     const savedCreds = localStorage.getItem(CREDENTIALS_KEY);
@@ -102,6 +92,8 @@ export default function WalletPage() {
         setCredentials(creds);
         setUsername(creds.username);
         setPassword(creds.password);
+        savedUsername = creds.username;
+        savedPassword = creds.password;
       } catch {
         localStorage.removeItem(CREDENTIALS_KEY);
       }
@@ -115,6 +107,20 @@ export default function WalletPage() {
       } catch {
         localStorage.removeItem(WALLET_KEY);
       }
+    }
+
+    // Auto-refresh if we have credentials
+    if (savedUsername && savedPassword) {
+      // We can't call fetchBalance safely here because it depends on state that might not be set yet
+      // in this closure, BUT we can simply call the API directly or use a timeout.
+      // Or better, trigger it via a separate effect that watches credentials.
+      // However, to keep it simple and avoid loops:
+      setTimeout(() => {
+        const syncBtn = document.querySelector(
+          'button[title="Refresh Balance"]'
+        ) as HTMLButtonElement;
+        if (syncBtn) syncBtn.click();
+      }, 500);
     }
   }, []);
 
@@ -162,33 +168,12 @@ export default function WalletPage() {
               result.data.cardNumber ?? walletData?.cardNumber ?? null,
             pass: result.data.pass ?? walletData?.pass ?? null,
             lastUpdated: result.data.lastUpdated,
-            transactions: walletData?.transactions || [],
+            transactions: result.data.transactions || [],
+            raw: result.data.raw,
           };
 
-          // If balance changed, record it as a transaction
-          if (
-            walletData &&
-            result.data.balance !== null &&
-            result.data.balance !== walletData.balance
-          ) {
-            const diff = result.data.balance - walletData.balance;
-            newWalletData.transactions = [
-              {
-                id: Date.now().toString(),
-                type: diff > 0 ? ("credit" as const) : ("debit" as const),
-                amount: Math.abs(diff),
-                description:
-                  diff > 0
-                    ? "Balance increased (synced from SEPTA)"
-                    : "Balance decreased (synced from SEPTA)",
-                timestamp: new Date().toISOString(),
-              },
-              ...walletData.transactions,
-            ].slice(0, 50);
-          }
-
           saveWalletData(newWalletData);
-          setSuccessMessage("Balance updated!");
+          setSuccessMessage("Balance & Trips updated!");
           setTimeout(() => setSuccessMessage(null), 3000);
         } else {
           setError(result.error || "Failed to fetch balance");
@@ -206,51 +191,6 @@ export default function WalletPage() {
   const handleLogin = async (e: React.FormEvent) => {
     e.preventDefault();
     await fetchBalance();
-  };
-
-  // Deduct fare
-  const handleDeductFare = () => {
-    if (!walletData) return;
-
-    const amount =
-      selectedFare === "custom"
-        ? parseFloat(customFare)
-        : FARE_RATES[selectedFare as keyof typeof FARE_RATES];
-
-    if (isNaN(amount) || amount <= 0) return;
-
-    const fareNames: Record<string, string> = {
-      bus: "Bus Fare",
-      trolley: "Trolley Fare",
-      subway: "Subway Fare",
-      regional_rail_zone1: "Regional Rail (Zone 1)",
-      regional_rail_zone2: "Regional Rail (Zone 2)",
-      regional_rail_zone3: "Regional Rail (Zone 3)",
-      regional_rail_zone4: "Regional Rail (Zone 4)",
-      transfer: "Transfer",
-      custom: "Custom Fare",
-    };
-
-    const newData: WalletData = {
-      ...walletData,
-      balance: Math.max(0, walletData.balance - amount),
-      lastUpdated: new Date().toISOString(),
-      transactions: [
-        {
-          id: Date.now().toString(),
-          type: "debit" as const,
-          amount,
-          description: fareNames[selectedFare || "custom"] || "Fare",
-          timestamp: new Date().toISOString(),
-        },
-        ...walletData.transactions,
-      ].slice(0, 50),
-    };
-
-    saveWalletData(newData);
-    setSelectedFare(null);
-    setCustomFare("");
-    setShowDeductFare(false);
   };
 
   // Logout / Clear data
@@ -301,7 +241,10 @@ export default function WalletPage() {
           <>
             {/* Balance Card */}
             <div className="relative overflow-hidden rounded-3xl bg-gradient-to-br from-septa-gold via-amber-500 to-orange-500 p-6">
-              <div className="absolute inset-0 opacity-20">
+              <div
+                className="absolute inset-0 opacity-20"
+                onClick={() => setShowDebug(!showDebug)} // Secret toggle
+              >
                 <svg
                   className="w-full h-full"
                   viewBox="0 0 100 100"
@@ -372,7 +315,7 @@ export default function WalletPage() {
                 </p>
 
                 {/* Quick Actions */}
-                <div className="grid grid-cols-2 gap-3">
+                <div className="grid grid-cols-1 gap-3">
                   <a
                     href={SEPTA_URLS.addFunds}
                     target="_blank"
@@ -382,16 +325,16 @@ export default function WalletPage() {
                     <Plus className="w-4 h-4" />
                     Add Funds
                   </a>
-                  <button
-                    onClick={() => setShowDeductFare(true)}
-                    className="flex items-center justify-center gap-2 py-3.5 bg-white/20 backdrop-blur-sm text-white font-semibold rounded-xl transition-all hover:bg-white/30 text-sm"
-                  >
-                    <Minus className="w-4 h-4" />
-                    Log Trip
-                  </button>
                 </div>
               </div>
             </div>
+
+            {/* Debug View */}
+            {showDebug && walletData.raw && (
+              <div className="p-4 rounded-xl bg-black text-green-400 font-mono text-xs overflow-auto max-h-60 border border-green-900">
+                <pre>{JSON.stringify(walletData.raw, null, 2)}</pre>
+              </div>
+            )}
 
             {/* Action Cards */}
             <div className="grid grid-cols-2 gap-3">
@@ -400,6 +343,7 @@ export default function WalletPage() {
                 target="_blank"
                 rel="noopener noreferrer"
                 className="p-4 rounded-xl bg-bg-secondary border border-border-subtle text-center hover:border-septa-blue/30 transition-colors"
+                title="Click pattern on card to toggle debug"
               >
                 <ExternalLink className="w-6 h-6 text-septa-blue mx-auto mb-2" />
                 <p className="font-semibold text-text-primary text-sm">
@@ -425,58 +369,155 @@ export default function WalletPage() {
             </div>
 
             {/* Transaction History */}
-            {walletData.transactions.length > 0 && (
-              <section>
-                <div className="flex items-center justify-between mb-3">
-                  <h2 className="text-lg font-semibold text-text-primary flex items-center gap-2">
-                    <History className="w-5 h-5" />
-                    Recent Activity
-                  </h2>
-                </div>
+            <section>
+              <div className="flex items-center justify-between mb-3">
+                <h2 className="text-lg font-semibold text-text-primary flex items-center gap-2">
+                  <History className="w-5 h-5" />
+                  Recent Activity
+                </h2>
+              </div>
+
+              {walletData.transactions.length > 0 ? (
                 <div className="space-y-2">
-                  {walletData.transactions.slice(0, 5).map((tx) => (
-                    <div
-                      key={tx.id}
-                      className="p-3 rounded-xl bg-bg-secondary border border-border-subtle flex items-center justify-between"
-                    >
-                      <div className="flex items-center gap-3">
-                        <div
-                          className={`w-8 h-8 rounded-lg flex items-center justify-center ${
+                  {walletData.transactions.slice(0, 5).map((tx) => {
+                    let dateStr = "Unknown Date";
+                    try {
+                      dateStr = new Date(tx.timestamp).toLocaleDateString();
+                      if (dateStr === "Invalid Date") throw new Error();
+                    } catch {
+                      dateStr = "Recent";
+                    }
+
+                    return (
+                      <div
+                        key={tx.id}
+                        className="p-3 rounded-xl bg-bg-secondary border border-border-subtle flex items-center justify-between"
+                      >
+                        <div className="flex items-center gap-3">
+                          <div
+                            className={`w-8 h-8 rounded-lg flex items-center justify-center ${
+                              tx.type === "credit"
+                                ? "bg-live/10"
+                                : "bg-bg-tertiary"
+                            }`}
+                          >
+                            {tx.type === "credit" ? (
+                              <Plus className="w-4 h-4 text-live" />
+                            ) : (
+                              <Minus className="w-4 h-4 text-text-secondary" />
+                            )}
+                          </div>
+                          <div>
+                            <p className="font-medium text-text-primary text-sm line-clamp-1">
+                              {tx.description}
+                            </p>
+                            <p className="text-xs text-text-muted">{dateStr}</p>
+                          </div>
+                        </div>
+                        <p
+                          className={`font-bold font-mono text-sm ${
                             tx.type === "credit"
-                              ? "bg-live/10"
-                              : "bg-bg-tertiary"
+                              ? "text-live"
+                              : "text-text-primary"
                           }`}
                         >
-                          {tx.type === "credit" ? (
-                            <Plus className="w-4 h-4 text-live" />
-                          ) : (
-                            <Minus className="w-4 h-4 text-text-secondary" />
-                          )}
-                        </div>
-                        <div>
-                          <p className="font-medium text-text-primary text-sm">
-                            {tx.description}
-                          </p>
-                          <p className="text-xs text-text-muted">
-                            {new Date(tx.timestamp).toLocaleDateString()}
-                          </p>
-                        </div>
+                          {tx.type === "credit" ? "+" : "-"}$
+                          {tx.amount.toFixed(2)}
+                        </p>
                       </div>
-                      <p
-                        className={`font-bold font-mono text-sm ${
-                          tx.type === "credit"
-                            ? "text-live"
-                            : "text-text-primary"
-                        }`}
-                      >
-                        {tx.type === "credit" ? "+" : "-"}$
-                        {tx.amount.toFixed(2)}
-                      </p>
-                    </div>
-                  ))}
+                    );
+                  })}
                 </div>
-              </section>
-            )}
+              ) : (
+                <div className="p-6 rounded-xl bg-bg-secondary border border-border-subtle text-center">
+                  <p className="text-text-muted text-sm">
+                    No recent activity found.
+                  </p>
+                </div>
+              )}
+
+              {/* View More Button */}
+              <div className="pt-2">
+                <button
+                  onClick={() => setShowHistoryDrawer(true)}
+                  className="w-full p-3 rounded-xl bg-bg-tertiary border border-border-default flex items-center justify-center gap-2 text-text-secondary hover:text-text-primary hover:border-border-strong transition-colors text-sm"
+                >
+                  View Full History
+                </button>
+              </div>
+            </section>
+
+            {/* History Drawer */}
+            <Drawer
+              isOpen={showHistoryDrawer}
+              onClose={() => setShowHistoryDrawer(false)}
+              title="Trip History"
+            >
+              <div className="space-y-3 pt-2">
+                {walletData.transactions.length > 0 ? (
+                  walletData.transactions.map((tx) => {
+                    let dateStr = "Unknown Date";
+                    let timeStr = "";
+                    try {
+                      const dateObj = new Date(tx.timestamp);
+                      dateStr = dateObj.toLocaleDateString();
+                      timeStr = dateObj.toLocaleTimeString([], {
+                        hour: "2-digit",
+                        minute: "2-digit",
+                      });
+                    } catch {
+                      dateStr = "Recent";
+                    }
+
+                    return (
+                      <div
+                        key={tx.id}
+                        className="p-4 rounded-xl bg-bg-tertiary border border-border-subtle flex items-center justify-between"
+                      >
+                        <div className="flex items-center gap-4">
+                          <div
+                            className={`w-10 h-10 rounded-xl flex items-center justify-center ${
+                              tx.type === "credit"
+                                ? "bg-live/10"
+                                : "bg-bg-primary"
+                            }`}
+                          >
+                            {tx.type === "credit" ? (
+                              <Plus className="w-5 h-5 text-live" />
+                            ) : (
+                              <Minus className="w-5 h-5 text-text-secondary" />
+                            )}
+                          </div>
+                          <div>
+                            <p className="font-semibold text-text-primary text-sm">
+                              {tx.description}
+                            </p>
+                            <p className="text-xs text-text-muted mt-0.5">
+                              {dateStr} <span className="opacity-50">•</span>{" "}
+                              {timeStr}
+                            </p>
+                          </div>
+                        </div>
+                        <p
+                          className={`font-bold font-mono text-base ${
+                            tx.type === "credit"
+                              ? "text-live"
+                              : "text-text-primary"
+                          }`}
+                        >
+                          {tx.type === "credit" ? "+" : "-"}$
+                          {tx.amount.toFixed(2)}
+                        </p>
+                      </div>
+                    );
+                  })
+                ) : (
+                  <div className="text-center py-10 text-text-muted">
+                    No history available.
+                  </div>
+                )}
+              </div>
+            </Drawer>
 
             {/* Logout */}
             <button
@@ -608,150 +649,6 @@ export default function WalletPage() {
           </>
         )}
       </main>
-
-      {/* Deduct Fare Modal */}
-      {showDeductFare && walletData && (
-        <Modal
-          onClose={() => {
-            setShowDeductFare(false);
-            setSelectedFare(null);
-          }}
-        >
-          <div className="flex items-center gap-3 mb-6">
-            <div className="w-12 h-12 rounded-xl bg-amber-500/20 flex items-center justify-center">
-              <Minus className="w-6 h-6 text-amber-500" />
-            </div>
-            <div>
-              <h2 className="text-xl font-bold text-text-primary">Log Trip</h2>
-              <p className="text-sm text-text-secondary">
-                Deduct fare from balance
-              </p>
-            </div>
-          </div>
-
-          <div className="space-y-3 mb-4">
-            <p className="text-sm font-medium text-text-secondary">
-              Select fare type:
-            </p>
-
-            <div className="grid grid-cols-2 gap-2">
-              {[
-                { key: "bus", label: "Bus/Trolley", price: FARE_RATES.bus },
-                { key: "subway", label: "Subway", price: FARE_RATES.subway },
-                {
-                  key: "transfer",
-                  label: "Transfer",
-                  price: FARE_RATES.transfer,
-                },
-                {
-                  key: "regional_rail_zone1",
-                  label: "Rail Zone 1",
-                  price: FARE_RATES.regional_rail_zone1,
-                },
-                {
-                  key: "regional_rail_zone2",
-                  label: "Rail Zone 2",
-                  price: FARE_RATES.regional_rail_zone2,
-                },
-                {
-                  key: "regional_rail_zone3",
-                  label: "Rail Zone 3",
-                  price: FARE_RATES.regional_rail_zone3,
-                },
-              ].map((fare) => (
-                <button
-                  key={fare.key}
-                  onClick={() => setSelectedFare(fare.key)}
-                  className={`p-3 rounded-xl border text-left transition-all ${
-                    selectedFare === fare.key
-                      ? "bg-septa-gold/20 border-septa-gold text-text-primary"
-                      : "bg-bg-tertiary border-border-default hover:border-border-strong"
-                  }`}
-                >
-                  <p className="font-medium text-sm">{fare.label}</p>
-                  <p className="text-xs text-text-muted">
-                    ${fare.price.toFixed(2)}
-                  </p>
-                </button>
-              ))}
-            </div>
-
-            <button
-              onClick={() => setSelectedFare("custom")}
-              className={`w-full p-3 rounded-xl border text-left transition-all ${
-                selectedFare === "custom"
-                  ? "bg-septa-gold/20 border-septa-gold"
-                  : "bg-bg-tertiary border-border-default hover:border-border-strong"
-              }`}
-            >
-              <p className="font-medium text-sm">Custom Amount</p>
-            </button>
-
-            {selectedFare === "custom" && (
-              <div className="relative">
-                <span className="absolute left-4 top-1/2 -translate-y-1/2 text-text-muted">
-                  $
-                </span>
-                <input
-                  type="number"
-                  value={customFare}
-                  onChange={(e) => setCustomFare(e.target.value)}
-                  placeholder="0.00"
-                  step="0.01"
-                  min="0"
-                  className="w-full pl-10 pr-4 py-3 bg-bg-tertiary border border-border-default rounded-xl text-text-primary font-mono placeholder:text-text-muted focus:border-septa-gold focus:ring-2 focus:ring-septa-gold/20 outline-none"
-                />
-              </div>
-            )}
-          </div>
-
-          <button
-            onClick={handleDeductFare}
-            disabled={
-              !selectedFare ||
-              (selectedFare === "custom" &&
-                (!customFare || parseFloat(customFare) <= 0))
-            }
-            className="w-full py-4 bg-amber-500 hover:bg-amber-600 text-white font-bold rounded-xl transition-all disabled:opacity-60 disabled:cursor-not-allowed"
-          >
-            Deduct $
-            {selectedFare === "custom"
-              ? (parseFloat(customFare) || 0).toFixed(2)
-              : (
-                  FARE_RATES[selectedFare as keyof typeof FARE_RATES] || 0
-                ).toFixed(2)}
-          </button>
-        </Modal>
-      )}
     </>
-  );
-}
-
-// Modal component
-function Modal({
-  children,
-  onClose,
-}: {
-  children: React.ReactNode;
-  onClose: () => void;
-}) {
-  return (
-    <div className="fixed inset-0 z-[100] flex items-end sm:items-center justify-center">
-      <div
-        className="absolute inset-0 bg-black/70 backdrop-blur-sm animate-fade-in"
-        onClick={onClose}
-      />
-      <div className="relative w-full sm:max-w-md mx-4 mb-0 sm:mb-0 animate-slide-up">
-        <div className="bg-bg-secondary rounded-t-3xl sm:rounded-2xl border border-border-subtle overflow-hidden shadow-2xl p-6">
-          <button
-            onClick={onClose}
-            className="absolute top-4 right-4 p-2 rounded-full bg-bg-tertiary/50 hover:bg-bg-tertiary transition-colors"
-          >
-            <X className="w-5 h-5 text-text-secondary" />
-          </button>
-          {children}
-        </div>
-      </div>
-    </div>
   );
 }
